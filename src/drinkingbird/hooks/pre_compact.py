@@ -2,29 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 from drinkingbird.hooks.base import DebugFn, Hook, HookResult
 
 
-# Default context patterns
-DEFAULT_CONTEXT_PATTERNS = [
-    "*plan*.md",
-    "*spec*.md",
-    "*design*.md",
-    "*architecture*.md",
-    "*requirements*.md",
+# Default context files (no wildcards - only explicit files)
+DEFAULT_CONTEXT_FILES = [
     "CLAUDE.md",
     "README.md",
-]
-
-# Priority directories to scan
-CONTEXT_DIRS = [
-    "docs/plans",
-    "docs",
-    ".claude/plans",
 ]
 
 
@@ -37,68 +27,137 @@ class PreCompactHook(Hook):
         """Handle pre-compact hook event."""
         cwd = hook_input.get("cwd", os.getcwd())
         trigger = hook_input.get("matcher", "auto")
+        transcript_path = hook_input.get("transcript_path", "")
 
         debug(f"PreCompact triggered by: {trigger}")
 
-        # Get patterns from config or use defaults
-        patterns = getattr(self.config, "context_patterns", DEFAULT_CONTEXT_PATTERNS)
-
-        # Find context files
-        context_files = self._find_context_files(cwd, patterns)
+        # Find default context files (CLAUDE.md, README.md)
+        context_files = self._find_default_files(cwd)
         debug(f"Found {len(context_files)} context files")
 
-        if not context_files:
-            debug("No context files found")
+        # Extract @refs from user messages in transcript
+        user_refs = self._extract_user_refs(transcript_path)
+        debug(f"Found {len(user_refs)} user @refs")
+
+        if not context_files and not user_refs:
+            debug("No context files or user refs found")
             return HookResult.allow("No context files")
 
         # Build reminder
-        reminder = self._build_context_reminder(context_files)
+        reminder = self._build_context_reminder(context_files, user_refs)
         debug(f"Reminder: {reminder[:200]}...")
 
         return HookResult.with_context(reminder)
 
-    def _find_context_files(
-        self, cwd: str, patterns: list[str]
-    ) -> list[str]:
-        """Find important context files in priority order."""
+    def _find_default_files(self, cwd: str) -> list[str]:
+        """Find default context files (CLAUDE.md, README.md)."""
         found = []
         cwd_path = Path(cwd)
 
-        # Check priority directories first
-        for dir_pattern in CONTEXT_DIRS:
-            dir_path = cwd_path / dir_pattern
-            if dir_path.exists() and dir_path.is_dir():
-                for pattern in patterns:
-                    for match in dir_path.glob(pattern):
-                        if match.is_file():
-                            rel_path = str(match.relative_to(cwd_path))
-                            if rel_path not in found:
-                                found.append(rel_path)
-
-        # Check root level for key files
-        for pattern in ["CLAUDE.md", "README.md"]:
-            root_file = cwd_path / pattern
-            if root_file.exists():
-                if pattern not in found:
-                    found.append(pattern)
+        for filename in DEFAULT_CONTEXT_FILES:
+            file_path = cwd_path / filename
+            if file_path.exists() and file_path.is_file():
+                found.append(filename)
 
         return found
 
-    def _build_context_reminder(self, files: list[str]) -> str:
+    def _extract_user_refs(self, transcript_path: str) -> list[str]:
+        """Extract @references from all user messages in transcript."""
+        if not transcript_path:
+            return []
+
+        refs: list[str] = []
+        seen: set[str] = set()
+
+        try:
+            with open(transcript_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # Extract user message content
+                    content = self._get_user_content(msg)
+                    if content:
+                        for ref in self._extract_mentions(content):
+                            if ref not in seen:
+                                refs.append(ref)
+                                seen.add(ref)
+        except (FileNotFoundError, PermissionError):
+            pass
+
+        return refs
+
+    def _get_user_content(self, msg: dict) -> str | None:
+        """Extract text content from a user message."""
+        # Claude Code format: type="user", message={role, content, ...}
+        if msg.get("type") == "user":
+            inner_msg = msg.get("message", {})
+            if isinstance(inner_msg, dict):
+                content = inner_msg.get("content", "")
+                if isinstance(content, str):
+                    return content
+                elif isinstance(content, list):
+                    parts = []
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            parts.append(block.get("text", ""))
+                        elif isinstance(block, str):
+                            parts.append(block)
+                    return "\n".join(parts)
+            elif isinstance(inner_msg, str):
+                return inner_msg
+        # API format: role="user" at top level
+        elif msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                    elif isinstance(block, str):
+                        parts.append(block)
+                return "\n".join(parts)
+            return content if isinstance(content, str) else None
+        return None
+
+    def _extract_mentions(self, text: str) -> list[str]:
+        """Extract @path/to/file mentions from text."""
+        if not text:
+            return []
+        pattern = r"@([\w./-]+)"
+        return re.findall(pattern, text)
+
+    def _build_context_reminder(
+        self, files: list[str], user_refs: list[str]
+    ) -> str:
         """Build a context reminder string."""
-        if not files:
-            return ""
+        lines = []
 
-        lines = [
-            "=== CRITICAL CONTEXT FILES ===",
-            "These files contain important project context. Reference them if you lose track:",
-            "",
-        ]
+        if files:
+            lines.append("=== CRITICAL CONTEXT FILES ===")
+            lines.append(
+                "These files contain important project context. "
+                "Reference them if you lose track:"
+            )
+            lines.append("")
+            for f in files:
+                lines.append(f"  - {f}")
+            lines.append("")
 
-        for f in files[:10]:  # Limit to 10 files
-            lines.append(f"  - {f}")
+        if user_refs:
+            lines.append("=== USER-REFERENCED DOCUMENTS ===")
+            lines.append(
+                "The user referenced these documents. "
+                "They are critical to the task:"
+            )
+            lines.append("")
+            for ref in user_refs[:20]:  # Limit to 20 refs
+                lines.append(f"  - @{ref}")
+            lines.append("")
 
-        lines.append("")
-        lines.append("Re-read these files if you're unsure about the task or approach.")
-
-        return "\n".join(lines)
+        return "\n".join(lines) if lines else ""

@@ -135,6 +135,10 @@ class StopHook(Hook):
             message = response.content.get(
                 "message", response.content.get("reason", "Get back to work.")
             )
+            # Include @ref paths in correction message
+            if all_mentions:
+                refs = ", ".join(f"@{m}" for m in all_mentions)
+                message = f"{message}\n\nReferenced documents: {refs}"
             return HookResult.block(message)
 
         elif decision == "kill":
