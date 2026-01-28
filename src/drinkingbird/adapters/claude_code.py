@@ -43,27 +43,47 @@ class ClaudeCodeAdapter(Adapter):
             "hooks": {
                 "Stop": [
                     {
-                        "command": "bdb run",
-                        "timeout": 30000,
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bdb run",
+                                "timeout": 30000,
+                            }
+                        ]
                     }
                 ],
                 "PreToolUse": [
                     {
-                        "command": "bdb run",
-                        "timeout": 5000,
                         "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bdb run",
+                                "timeout": 5000,
+                            }
+                        ]
                     }
                 ],
                 "PostToolUseFailure": [
                     {
-                        "command": "bdb run",
-                        "timeout": 15000,
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bdb run",
+                                "timeout": 15000,
+                            }
+                        ]
                     }
                 ],
                 "PreCompact": [
                     {
-                        "command": "bdb run",
-                        "timeout": 5000,
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bdb run",
+                                "timeout": 5000,
+                            }
+                        ]
                     }
                 ],
             }
@@ -90,8 +110,9 @@ class ClaudeCodeAdapter(Adapter):
 
         # Update commands with actual bdb path
         for hook_name, hook_list in install_config["hooks"].items():
-            for hook in hook_list:
-                hook["command"] = str(bdb_path) + " run"
+            for hook_entry in hook_list:
+                for hook in hook_entry.get("hooks", []):
+                    hook["command"] = str(bdb_path) + " run"
 
         # Merge hooks - add our hooks to existing ones
         existing_hooks = existing.get("hooks", {})
@@ -99,10 +120,16 @@ class ClaudeCodeAdapter(Adapter):
             if hook_name not in existing_hooks:
                 existing_hooks[hook_name] = []
 
-            # Remove any existing bdb hooks
+            # Remove any existing bdb hooks (check nested structure)
+            def has_bdb(entry: dict) -> bool:
+                for hook in entry.get("hooks", []):
+                    if "bdb" in hook.get("command", ""):
+                        return True
+                return False
+
             existing_hooks[hook_name] = [
                 h for h in existing_hooks[hook_name]
-                if "bdb" not in h.get("command", "")
+                if not has_bdb(h)
             ]
 
             # Add our hooks
