@@ -174,7 +174,25 @@ class StopHook(Hook):
         """Extract all user messages from transcript."""
         user_messages = []
         for msg in messages:
-            if msg.get("role") == "user":
+            # Claude Code format: type="user", message={role, content, ...}
+            if msg.get("type") == "user":
+                inner_msg = msg.get("message", {})
+                if isinstance(inner_msg, dict):
+                    content = inner_msg.get("content", "")
+                    if isinstance(content, str):
+                        user_messages.append(content)
+                    elif isinstance(content, list):
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                text_parts.append(block.get("text", ""))
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        user_messages.append("\n".join(text_parts))
+                elif isinstance(inner_msg, str):
+                    user_messages.append(inner_msg)
+            # API format: role="user" at top level
+            elif msg.get("role") == "user":
                 content = msg.get("content", "")
                 if isinstance(content, list):
                     text_parts = []
@@ -185,9 +203,12 @@ class StopHook(Hook):
                             text_parts.append(block)
                     content = "\n".join(text_parts)
                 user_messages.append(content)
+            # Legacy format
             elif msg.get("type") == "human":
                 content = msg.get("message", "")
-                user_messages.append(content)
+                if isinstance(content, dict):
+                    content = content.get("content", "")
+                user_messages.append(str(content))
         return user_messages
 
     def _extract_user_messages(

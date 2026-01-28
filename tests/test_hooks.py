@@ -283,3 +283,71 @@ class TestStopHook:
 
         assert "--- @src/main.py ---" in prompt
         assert "--- @src/utils.py ---" in prompt
+
+    def test_extract_all_user_messages_claude_code_format(self):
+        """Test extracting user messages from Claude Code transcript format.
+
+        Claude Code uses: type="user", message={role: "user", content: "..."}
+        This is the format that was failing before the fix.
+        """
+        messages = [
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": "complete execution of @docs/plan.md",
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Working on it"}],
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": "Check @src/main.py too",
+                },
+            },
+        ]
+
+        result = self.hook._extract_all_user_messages(messages)
+
+        assert len(result) == 2
+        assert result[0] == "complete execution of @docs/plan.md"
+        assert result[1] == "Check @src/main.py too"
+
+        # Verify @-mentions are extractable from these messages
+        all_mentions = []
+        seen = set()
+        for user_msg in result:
+            for mention in self.hook._extract_mentions(user_msg):
+                if mention not in seen:
+                    all_mentions.append(mention)
+                    seen.add(mention)
+
+        assert all_mentions == ["docs/plan.md", "src/main.py"]
+
+    def test_extract_all_user_messages_claude_code_list_content(self):
+        """Test Claude Code format with list content blocks."""
+        messages = [
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Check @file1.py"},
+                        {"type": "text", "text": "and @file2.py"},
+                    ],
+                },
+            },
+        ]
+
+        result = self.hook._extract_all_user_messages(messages)
+
+        assert len(result) == 1
+        assert "Check @file1.py" in result[0]
+        assert "and @file2.py" in result[0]
