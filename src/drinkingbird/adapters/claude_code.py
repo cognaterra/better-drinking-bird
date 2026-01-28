@@ -13,6 +13,11 @@ class ClaudeCodeAdapter(Adapter):
     """Adapter for Claude Code hooks."""
 
     agent_name = "claude-code"
+    supports_local = True
+
+    def get_local_config_path(self, workspace: Path) -> Path:
+        """Get path to local Claude Code settings."""
+        return workspace / ".claude" / "settings.local.json"
 
     def parse_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Parse Claude Code hook input.
@@ -93,9 +98,14 @@ class ClaudeCodeAdapter(Adapter):
         """Get path to Claude Code settings."""
         return Path.home() / ".claude" / "settings.json"
 
-    def install(self, bdb_path: Path) -> bool:
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Install BDB hooks for Claude Code."""
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         # Read existing config
         existing = {}
@@ -143,9 +153,9 @@ class ClaudeCodeAdapter(Adapter):
 
         return True
 
-    def uninstall(self) -> bool:
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
         """Uninstall BDB hooks from Claude Code."""
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         if not config_path.exists():
             return False

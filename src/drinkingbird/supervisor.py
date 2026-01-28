@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from drinkingbird.config import Config, load_config
+from drinkingbird.pause import is_paused
 from drinkingbird.hooks import (
     Hook,
     HookResult,
@@ -172,6 +173,12 @@ class Supervisor:
         """
         event_name = hook_input.get("hook_event_name", "")
         self.debug(f"Handling event: {event_name}")
+
+        # Check if paused FIRST
+        paused, sentinel_path = is_paused()
+        if paused:
+            self.debug(f"BDB paused via {sentinel_path}")
+            return HookResult.allow("BDB is paused")
 
         # Get appropriate hook (pass tracer for LLM tracing)
         hook = get_hook(event_name, self.config, self.llm_provider, self.tracer)

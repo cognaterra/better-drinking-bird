@@ -16,6 +16,11 @@ class CursorAdapter(Adapter):
     """
 
     agent_name = "cursor"
+    supports_local = True
+
+    def get_local_config_path(self, workspace: Path) -> Path:
+        """Get path to local Cursor hooks configuration."""
+        return workspace / ".cursor" / "hooks.json"
 
     def parse_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Parse Cursor hook input.
@@ -76,24 +81,19 @@ class CursorAdapter(Adapter):
         }
 
     def get_config_path(self) -> Path:
-        """Get path to Cursor hooks configuration.
+        """Get path to global Cursor hooks configuration."""
+        return Path.home() / ".cursor" / "hooks.json"
 
-        Cursor stores hooks config in the workspace .cursor directory
-        or in the global config.
-        """
-        # Check for global config first
-        global_config = Path.home() / ".cursor" / "hooks.json"
-        if global_config.parent.exists():
-            return global_config
-
-        # Fall back to current workspace
-        return Path.cwd() / ".cursor" / "hooks.json"
-
-    def install(self, bdb_path: Path) -> bool:
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Install BDB hooks for Cursor."""
         import json
 
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         # Read existing config
         existing = {}
@@ -121,11 +121,11 @@ class CursorAdapter(Adapter):
 
         return True
 
-    def uninstall(self) -> bool:
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
         """Uninstall BDB hooks from Cursor."""
         import json
 
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         if not config_path.exists():
             return False

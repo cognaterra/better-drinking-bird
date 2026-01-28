@@ -12,7 +12,8 @@ from typing import Any
 import yaml
 
 
-CONFIG_PATH = Path.home() / ".bdbrc"
+CONFIG_PATH = Path.home() / ".bdb" / "config.yaml"
+LEGACY_CONFIG_PATH = Path.home() / ".bdbrc"
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -320,7 +321,8 @@ def load_config(path: Path | None = None) -> Config:
     """Load configuration from YAML file.
 
     Args:
-        path: Path to config file. Defaults to ~/.bdbrc
+        path: Path to config file. Defaults to ~/.bdb/config.yaml,
+              falls back to ~/.bdbrc for backwards compatibility.
 
     Returns:
         Loaded Config object
@@ -328,10 +330,17 @@ def load_config(path: Path | None = None) -> Config:
     Raises:
         ConfigError: If config file has insecure permissions or is invalid
     """
-    config_path = path or CONFIG_PATH
+    if path is not None:
+        config_path = path
+    elif CONFIG_PATH.exists():
+        config_path = CONFIG_PATH
+    elif LEGACY_CONFIG_PATH.exists():
+        config_path = LEGACY_CONFIG_PATH
+    else:
+        # Return default config if no file exists
+        return Config()
 
     if not config_path.exists():
-        # Return default config if no file exists
         return Config()
 
     # Check permissions
@@ -368,7 +377,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
 def generate_template() -> str:
     """Generate a template configuration file."""
     return """# Better Drinking Bird Configuration
-# File permissions should be 600 (chmod 600 ~/.bdbrc)
+# Location: ~/.bdb/config.yaml
+# File permissions should be 600 (chmod 600 ~/.bdb/config.yaml)
 
 # LLM Provider Configuration
 llm:

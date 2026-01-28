@@ -17,6 +17,11 @@ class ClineAdapter(Adapter):
     """
 
     agent_name = "cline"
+    supports_local = True
+
+    def get_local_config_path(self, workspace: Path) -> Path:
+        """Get path to local Cline hooks directory."""
+        return workspace / ".cline" / "hooks"
 
     # Map Cline event names to BDB standard names
     EVENT_MAP = {
@@ -100,12 +105,17 @@ class ClineAdapter(Adapter):
         """Get path to Cline hooks directory."""
         return Path.home() / "Documents" / "Cline" / "Hooks"
 
-    def install(self, bdb_path: Path) -> bool:
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Install BDB hooks for Cline.
 
         Creates executable wrapper scripts in the Cline hooks directory.
         """
-        hooks_dir = self.get_config_path()
+        hooks_dir = self.get_effective_config_path(scope, workspace)
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
         # Script template
@@ -128,3 +138,26 @@ exec {bdb_path} run --adapter cline
             script_path.chmod(current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         return True
+
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
+        """Uninstall BDB hooks from Cline.
+
+        Removes bdb hook scripts from the Cline hooks directory.
+        """
+        hooks_dir = self.get_effective_config_path(scope, workspace)
+
+        if not hooks_dir.exists():
+            return False
+
+        install_config = self.get_install_config()
+        found_bdb = False
+
+        for hook_name in install_config["hooks"]:
+            script_path = hooks_dir / hook_name
+            if script_path.exists():
+                content = script_path.read_text()
+                if "bdb" in content:
+                    script_path.unlink()
+                    found_bdb = True
+
+        return found_bdb

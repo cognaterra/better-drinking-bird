@@ -17,6 +17,9 @@ class Adapter(ABC):
     # Name of the agent this adapter supports
     agent_name: str = ""
 
+    # Whether this adapter supports local (per-workspace) installation
+    supports_local: bool = True
+
     def __init__(self, config: Any = None):
         """Initialize adapter with optional configuration.
 
@@ -61,18 +64,59 @@ class Adapter(ABC):
 
     @abstractmethod
     def get_config_path(self) -> Path:
-        """Get path to the agent's hook configuration file.
+        """Get path to the agent's global hook configuration file.
 
         Returns:
             Path to config file
         """
         pass
 
-    def install(self, bdb_path: Path) -> bool:
+    def get_local_config_path(self, workspace: Path) -> Path:
+        """Get path to the agent's local (per-workspace) config file.
+
+        Args:
+            workspace: Path to the workspace root
+
+        Returns:
+            Path to local config file
+
+        Raises:
+            NotImplementedError: If adapter doesn't support local installation
+        """
+        raise NotImplementedError(
+            f"{self.agent_name} does not support local installation"
+        )
+
+    def get_effective_config_path(
+        self, scope: str = "global", workspace: Path | None = None
+    ) -> Path:
+        """Get the config path for the given scope.
+
+        Args:
+            scope: "global" or "local"
+            workspace: Workspace path (required for local scope)
+
+        Returns:
+            Path to config file
+        """
+        if scope == "local":
+            if workspace is None:
+                raise ValueError("workspace is required for local scope")
+            return self.get_local_config_path(workspace)
+        return self.get_config_path()
+
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Install BDB hooks for this agent.
 
         Args:
             bdb_path: Path to the bdb executable
+            scope: "global" or "local"
+            workspace: Workspace path (required for local scope)
 
         Returns:
             True if installation succeeded
@@ -80,7 +124,7 @@ class Adapter(ABC):
         # Default implementation - subclasses can override
         import json
 
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
         install_config = self.get_install_config()
 
         # Read existing config if present
@@ -115,8 +159,12 @@ class Adapter(ABC):
         return result
 
     @abstractmethod
-    def uninstall(self) -> bool:
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
         """Uninstall BDB hooks for this agent.
+
+        Args:
+            scope: "global" or "local"
+            workspace: Workspace path (required for local scope)
 
         Returns:
             True if uninstallation succeeded, False if nothing to uninstall

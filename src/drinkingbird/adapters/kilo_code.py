@@ -17,6 +17,11 @@ class KiloCodeAdapter(Adapter):
     """
 
     agent_name = "kilo-code"
+    supports_local = True
+
+    def get_local_config_path(self, workspace: Path) -> Path:
+        """Get path to local Kilo Code settings."""
+        return workspace / ".kilocode" / "settings.local.json"
 
     def parse_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Parse Kilo Code hook input.
@@ -68,9 +73,14 @@ class KiloCodeAdapter(Adapter):
         """Get path to Kilo Code settings."""
         return Path.home() / ".kilocode" / "settings.json"
 
-    def install(self, bdb_path: Path) -> bool:
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Install BDB hooks for Kilo Code."""
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         # Read existing config
         existing = {}
@@ -109,4 +119,48 @@ class KiloCodeAdapter(Adapter):
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(existing, indent=2))
 
+        return True
+
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
+        """Uninstall BDB hooks from Kilo Code."""
+        config_path = self.get_effective_config_path(scope, workspace)
+
+        if not config_path.exists():
+            return False
+
+        try:
+            existing = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            return False
+
+        existing_hooks = existing.get("hooks", {})
+        if not existing_hooks:
+            return False
+
+        # Remove bdb hooks
+        found_bdb = False
+        for hook_name in list(existing_hooks.keys()):
+            hook_list = existing_hooks[hook_name]
+            if isinstance(hook_list, list):
+                original_len = len(hook_list)
+                existing_hooks[hook_name] = [
+                    h for h in hook_list if "bdb" not in h.get("command", "")
+                ]
+                if len(existing_hooks[hook_name]) < original_len:
+                    found_bdb = True
+                # Remove empty hook lists
+                if not existing_hooks[hook_name]:
+                    del existing_hooks[hook_name]
+
+        if not found_bdb:
+            return False
+
+        # Update or remove hooks key
+        if existing_hooks:
+            existing["hooks"] = existing_hooks
+        else:
+            del existing["hooks"]
+
+        # Write back
+        config_path.write_text(json.dumps(existing, indent=2))
         return True

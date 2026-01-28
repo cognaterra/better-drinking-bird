@@ -40,6 +40,7 @@ class StdinAdapter(Adapter):
     """
 
     agent_name = "stdin"
+    supports_local = False
 
     def parse_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Parse generic stdin input.
@@ -142,7 +143,12 @@ class StdinAdapter(Adapter):
         """No config path for generic adapter."""
         return Path("/dev/null")
 
-    def install(self, bdb_path: Path) -> bool:
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Generic adapter doesn't install anywhere.
 
         Print usage instructions instead.
@@ -157,7 +163,7 @@ class StdinAdapter(Adapter):
         print()
         return True
 
-    def uninstall(self) -> bool:
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
         """Generic adapter doesn't install anywhere, so nothing to uninstall."""
         print("Generic stdin/stdout adapter - no hooks installed.")
         return False

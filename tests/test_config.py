@@ -124,6 +124,64 @@ class TestCheckPermissions:
         assert check_permissions(config_file) is False
 
 
+class TestConfigPaths:
+    """Tests for config path resolution."""
+
+    def test_new_config_path(self):
+        """Test that CONFIG_PATH points to ~/.bdb/config.yaml."""
+        from drinkingbird.config import CONFIG_PATH
+        assert CONFIG_PATH == Path.home() / ".bdb" / "config.yaml"
+
+    def test_legacy_config_path(self):
+        """Test that LEGACY_CONFIG_PATH points to ~/.bdbrc."""
+        from drinkingbird.config import LEGACY_CONFIG_PATH
+        assert LEGACY_CONFIG_PATH == Path.home() / ".bdbrc"
+
+
+class TestLegacyConfigFallback:
+    """Tests for backwards-compatible config loading."""
+
+    def test_loads_from_new_path(self, tmp_path):
+        """Test loading from new config path."""
+        new_config = tmp_path / ".bdb" / "config.yaml"
+        new_config.parent.mkdir()
+        new_config.write_text("llm:\n  provider: anthropic")
+        new_config.chmod(0o600)
+
+        config = load_config(new_config)
+        assert config.llm.provider == "anthropic"
+
+    def test_falls_back_to_legacy(self, tmp_path, monkeypatch):
+        """Test fallback to legacy path when new doesn't exist."""
+        new_path = tmp_path / ".bdb" / "config.yaml"
+        legacy_path = tmp_path / ".bdbrc"
+        legacy_path.write_text("llm:\n  provider: ollama")
+        legacy_path.chmod(0o600)
+
+        monkeypatch.setattr("drinkingbird.config.CONFIG_PATH", new_path)
+        monkeypatch.setattr("drinkingbird.config.LEGACY_CONFIG_PATH", legacy_path)
+
+        config = load_config()
+        assert config.llm.provider == "ollama"
+
+    def test_new_path_takes_precedence(self, tmp_path, monkeypatch):
+        """Test that new path takes precedence over legacy."""
+        new_path = tmp_path / ".bdb" / "config.yaml"
+        new_path.parent.mkdir()
+        new_path.write_text("llm:\n  provider: anthropic")
+        new_path.chmod(0o600)
+
+        legacy_path = tmp_path / ".bdbrc"
+        legacy_path.write_text("llm:\n  provider: ollama")
+        legacy_path.chmod(0o600)
+
+        monkeypatch.setattr("drinkingbird.config.CONFIG_PATH", new_path)
+        monkeypatch.setattr("drinkingbird.config.LEGACY_CONFIG_PATH", legacy_path)
+
+        config = load_config()
+        assert config.llm.provider == "anthropic"
+
+
 class TestTemplate:
     """Tests for template generation."""
 

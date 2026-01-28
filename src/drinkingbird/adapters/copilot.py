@@ -16,6 +16,11 @@ class CopilotAdapter(Adapter):
     """
 
     agent_name = "copilot"
+    supports_local = True
+
+    def get_local_config_path(self, workspace: Path) -> Path:
+        """Get path to local Copilot hooks configuration."""
+        return workspace / ".github" / "copilot-hooks.yaml"
 
     def parse_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Parse Copilot hook input.
@@ -80,11 +85,16 @@ class CopilotAdapter(Adapter):
         """Get path to Copilot hooks configuration."""
         return Path.home() / ".copilot" / "hooks.yaml"
 
-    def install(self, bdb_path: Path) -> bool:
+    def install(
+        self,
+        bdb_path: Path,
+        scope: str = "global",
+        workspace: Path | None = None,
+    ) -> bool:
         """Install BDB hooks for Copilot."""
         import yaml
 
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         # Read existing config
         existing = {}
@@ -114,11 +124,11 @@ class CopilotAdapter(Adapter):
 
         return True
 
-    def uninstall(self) -> bool:
+    def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
         """Uninstall BDB hooks from Copilot."""
         import yaml
 
-        config_path = self.get_config_path()
+        config_path = self.get_effective_config_path(scope, workspace)
 
         if not config_path.exists():
             return False
