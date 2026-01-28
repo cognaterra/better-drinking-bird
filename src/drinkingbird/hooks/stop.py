@@ -209,7 +209,24 @@ class StopHook(Hook):
                     return str(content)
                 return str(content)
             elif msg.get("type") == "assistant":
-                message = msg.get("message", "")
+                # Claude Code format: type="assistant", message={role, content, ...}
+                message = msg.get("message", {})
+                if isinstance(message, dict):
+                    content = message.get("content", "")
+                    if isinstance(content, str):
+                        return content
+                    elif isinstance(content, list):
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                text_parts.append(block.get("text", ""))
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        return "\n".join(text_parts)
+                    elif isinstance(content, dict):
+                        if content.get("type") == "text":
+                            return content.get("text", "")
+                        return str(content)
                 return message if isinstance(message, str) else str(message)
         return None
 
