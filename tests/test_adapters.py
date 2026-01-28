@@ -597,3 +597,11 @@ class TestClineAdapter:
         }
         output = self.adapter.format_output(result, "PreCompact")
         assert output["contextModification"] == "Remember the plan"
+
+
+def test_adapter_exports():
+    """Test all adapters are exported from package."""
+    from drinkingbird import adapters
+
+    assert hasattr(adapters, "KiloCodeAdapter")
+    assert hasattr(adapters, "ClineAdapter")
