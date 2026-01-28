@@ -77,6 +77,7 @@ DEFAULT_CONFIG = {
         "secret_key_env": None,
         "host": "https://cloud.langfuse.com",
     },
+    "blocklist": [],
 }
 
 
@@ -255,6 +256,7 @@ class Config:
     hooks: HooksConfig = field(default_factory=HooksConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     tracing: TracingConfig = field(default_factory=TracingConfig)
+    blocklist: list[BlocklistEntry] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
@@ -264,6 +266,7 @@ class Config:
         hooks_data = data.get("hooks", {})
         logging_data = data.get("logging", {})
         tracing_data = data.get("tracing", {})
+        blocklist_data = data.get("blocklist", [])
 
         # Build hooks config
         stop_data = hooks_data.get("stop", {})
@@ -278,12 +281,22 @@ class Config:
             pre_compact=PreCompactHookConfig(**pre_compact_data) if pre_compact_data else PreCompactHookConfig(),
         )
 
+        # Parse blocklist entries
+        blocklist = []
+        for entry in blocklist_data:
+            blocklist.append(BlocklistEntry(
+                pattern=entry.get("pattern", ""),
+                reason=entry.get("reason", "Blocked by user blocklist"),
+                tools=entry.get("tools", ["*"]),
+            ))
+
         return cls(
             llm=LLMConfig(**llm_data) if llm_data else LLMConfig(),
             agent=AgentConfig(**agent_data) if agent_data else AgentConfig(),
             hooks=hooks_config,
             logging=LoggingConfig(**logging_data) if logging_data else LoggingConfig(),
             tracing=TracingConfig(**tracing_data) if tracing_data else TracingConfig(),
+            blocklist=blocklist,
         )
 
 
