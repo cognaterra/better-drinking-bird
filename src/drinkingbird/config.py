@@ -66,6 +66,14 @@ DEFAULT_CONFIG = {
         "file": "~/.bdb/supervisor.log",
         "error_file": "~/.bdb/errors.log",
     },
+    "tracing": {
+        "enabled": False,
+        "public_key": None,
+        "secret_key": None,
+        "public_key_env": None,
+        "secret_key_env": None,
+        "host": "https://cloud.langfuse.com",
+    },
 }
 
 
@@ -180,6 +188,38 @@ class LoggingConfig:
 
 
 @dataclass
+class TracingConfig:
+    """Langfuse tracing configuration."""
+
+    enabled: bool = False
+    public_key: str | None = None
+    secret_key: str | None = None
+    public_key_env: str | None = None
+    secret_key_env: str | None = None
+    host: str = "https://cloud.langfuse.com"
+
+    def get_public_key(self) -> str | None:
+        """Get public key from config or environment variable."""
+        if self.public_key:
+            return self.public_key
+        if self.public_key_env:
+            return os.environ.get(self.public_key_env)
+        return os.environ.get("LANGFUSE_PUBLIC_KEY")
+
+    def get_secret_key(self) -> str | None:
+        """Get secret key from config or environment variable."""
+        if self.secret_key:
+            return self.secret_key
+        if self.secret_key_env:
+            return os.environ.get(self.secret_key_env)
+        return os.environ.get("LANGFUSE_SECRET_KEY")
+
+    def is_configured(self) -> bool:
+        """Check if tracing is properly configured."""
+        return self.enabled and bool(self.get_public_key()) and bool(self.get_secret_key())
+
+
+@dataclass
 class Config:
     """Main configuration object."""
 
@@ -187,6 +227,7 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     hooks: HooksConfig = field(default_factory=HooksConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    tracing: TracingConfig = field(default_factory=TracingConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
@@ -195,6 +236,7 @@ class Config:
         agent_data = data.get("agent", {})
         hooks_data = data.get("hooks", {})
         logging_data = data.get("logging", {})
+        tracing_data = data.get("tracing", {})
 
         # Build hooks config
         stop_data = hooks_data.get("stop", {})
@@ -214,6 +256,7 @@ class Config:
             agent=AgentConfig(**agent_data) if agent_data else AgentConfig(),
             hooks=hooks_config,
             logging=LoggingConfig(**logging_data) if logging_data else LoggingConfig(),
+            tracing=TracingConfig(**tracing_data) if tracing_data else TracingConfig(),
         )
 
 
@@ -342,6 +385,15 @@ logging:
   level: info  # debug | info | warn | error
   file: ~/.bdb/supervisor.log
   error_file: ~/.bdb/errors.log
+
+# Tracing (Langfuse)
+tracing:
+  enabled: false
+  # public_key: pk-lf-...  # Or use public_key_env
+  # secret_key: sk-lf-...  # Or use secret_key_env
+  # public_key_env: LANGFUSE_PUBLIC_KEY
+  # secret_key_env: LANGFUSE_SECRET_KEY
+  host: https://cloud.langfuse.com  # Or self-hosted URL
 """
 
 

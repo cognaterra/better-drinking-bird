@@ -8,11 +8,30 @@ from typing import Any
 
 
 @dataclass
+class TokenUsage:
+    """Token usage from an LLM call."""
+
+    input: int = 0
+    output: int = 0
+
+    @property
+    def total(self) -> int:
+        """Total tokens used."""
+        return self.input + self.output
+
+    def to_dict(self) -> dict[str, int]:
+        """Convert to dictionary for tracing."""
+        return {"input": self.input, "output": self.output, "total": self.total}
+
+
+@dataclass
 class LLMResponse:
     """Response from an LLM call."""
 
     content: dict[str, Any]
     raw_response: dict[str, Any] | None = None
+    model: str | None = None
+    usage: TokenUsage | None = None
 
     @property
     def success(self) -> bool:

@@ -87,6 +87,23 @@ Error Output:
         )
         debug(f"LLM result: {response.content}")
 
+        # Log generation to tracer
+        if self.tracer:
+            self.tracer.generation(
+                name="generate_recovery_advice",
+                model=response.model or self.llm_provider.model or "unknown",
+                input_data={
+                    "system_prompt": SYSTEM_PROMPT,
+                    "user_prompt": user_prompt,
+                },
+                output_data=response.content,
+                usage=response.usage.to_dict() if response.usage else None,
+                metadata={
+                    "tool_name": tool_name,
+                    "response_schema": RESPONSE_SCHEMA,
+                },
+            )
+
         advice = response.content.get("advice", "Check command syntax and try again!")
         confidence = response.content.get("confidence", "low")
 

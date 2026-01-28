@@ -5,7 +5,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from drinkingbird.tracing import Tracer
 
 
 class Decision(str, Enum):
@@ -83,15 +86,22 @@ class Hook(ABC):
     # Hook event name that this hook handles
     event_name: str = ""
 
-    def __init__(self, config: Any, llm_provider: Any = None):
+    def __init__(
+        self,
+        config: Any,
+        llm_provider: Any = None,
+        tracer: Tracer | None = None,
+    ):
         """Initialize hook with configuration.
 
         Args:
             config: Hook-specific configuration
             llm_provider: LLM provider for hooks that need it
+            tracer: Tracer for logging LLM generations
         """
         self.config = config
         self.llm_provider = llm_provider
+        self.tracer = tracer
 
     @abstractmethod
     def handle(self, hook_input: dict[str, Any], debug: DebugFn) -> HookResult:

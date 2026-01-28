@@ -1,0 +1,73 @@
+# Better Drinking Bird Configuration Example
+# Copy to ~/.bdbrc and set permissions: chmod 600 ~/.bdbrc
+
+# LLM Provider Configuration
+llm:
+  provider: openai  # openai | anthropic | ollama
+  model: gpt-4o-mini
+  # Direct API key (not recommended - use env var instead)
+  # api_key: sk-your-key-here
+  # Reference an environment variable (recommended)
+  api_key_env: OPENAI_API_KEY
+  # Custom endpoint (optional)
+  # base_url: https://api.openai.com/v1
+  timeout: 30
+
+# Agent Configuration
+agent:
+  type: claude-code  # claude-code | cursor | copilot | stdin
+  conversation_depth: 1  # 0=full history, 1=last exchange, N=last N exchanges
+
+# Hook Configuration
+hooks:
+  # Stop hook - nudges agent to keep working
+  stop:
+    enabled: true
+    block_permission_seeking: true  # "Should I proceed?"
+    block_plan_deviation: true      # "Let me try a simpler approach"
+    block_quality_shortcuts: true   # "Skip those tests"
+
+  # Pre-tool hook - blocks dangerous commands
+  pre_tool:
+    enabled: true
+    categories:
+      ci_bypass: true        # --no-verify, HUSKY=0
+      destructive_git: true  # reset --hard, clean -f, push --force
+      branch_switching: true # checkout main (protects worktrees)
+      interactive_git: true  # rebase -i, add -p
+      dangerous_files: true  # rm -rf /
+      git_history: true      # verbose git log, git blame
+      credential_access: true # cat .env, .pem files
+
+  # Tool failure hook - provides recovery hints
+  tool_failure:
+    enabled: true
+    confidence_threshold: medium  # low | medium | high
+
+  # Pre-compact hook - preserves context during compression
+  pre_compact:
+    enabled: true
+    context_patterns:
+      - "docs/plans/*.md"
+      - "docs/*.md"
+      - ".claude/plans/*.md"
+      - "CLAUDE.md"
+      - "README.md"
+
+# Logging
+logging:
+  level: info  # debug | info | warn | error
+  file: ~/.bdb/supervisor.log
+  error_file: ~/.bdb/errors.log
+
+# Tracing (Langfuse) - Optional observability
+tracing:
+  enabled: false
+  # Direct keys (not recommended - use env vars instead)
+  # public_key: pk-lf-...
+  # secret_key: sk-lf-...
+  # Reference environment variables (recommended)
+  public_key_env: LANGFUSE_PUBLIC_KEY
+  secret_key_env: LANGFUSE_SECRET_KEY
+  # Langfuse host (cloud or self-hosted)
+  host: https://cloud.langfuse.com

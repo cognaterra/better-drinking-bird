@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from drinkingbird.llm.base import LLMProvider, LLMResponse
+from drinkingbird.llm.base import LLMProvider, LLMResponse, TokenUsage
 
 
 class AnthropicProvider(LLMProvider):
@@ -83,7 +83,23 @@ class AnthropicProvider(LLMProvider):
                 # Parse JSON from response
                 content = json.loads(text_content)
 
-                return LLMResponse(content=content, raw_response=result)
+                # Extract token usage
+                usage = None
+                if "usage" in result:
+                    usage = TokenUsage(
+                        input=result["usage"].get("input_tokens", 0),
+                        output=result["usage"].get("output_tokens", 0),
+                    )
+
+                # Get actual model used
+                actual_model = result.get("model", self.model)
+
+                return LLMResponse(
+                    content=content,
+                    raw_response=result,
+                    model=actual_model,
+                    usage=usage,
+                )
 
         except httpx.HTTPStatusError as e:
             return LLMResponse(

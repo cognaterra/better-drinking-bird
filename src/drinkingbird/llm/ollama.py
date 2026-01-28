@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from drinkingbird.llm.base import LLMProvider, LLMResponse
+from drinkingbird.llm.base import LLMProvider, LLMResponse, TokenUsage
 
 
 class OllamaProvider(LLMProvider):
@@ -73,7 +73,23 @@ class OllamaProvider(LLMProvider):
                 # Parse JSON from response
                 content = json.loads(response_text)
 
-                return LLMResponse(content=content, raw_response=result)
+                # Extract token usage (Ollama provides these)
+                usage = None
+                if "prompt_eval_count" in result or "eval_count" in result:
+                    usage = TokenUsage(
+                        input=result.get("prompt_eval_count", 0),
+                        output=result.get("eval_count", 0),
+                    )
+
+                # Get actual model used
+                actual_model = result.get("model", self.model)
+
+                return LLMResponse(
+                    content=content,
+                    raw_response=result,
+                    model=actual_model,
+                    usage=usage,
+                )
 
         except httpx.HTTPStatusError as e:
             return LLMResponse(

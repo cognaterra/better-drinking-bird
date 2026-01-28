@@ -27,6 +27,7 @@ from drinkingbird.llm import LLMProvider
 from drinkingbird.llm.anthropic import AnthropicProvider
 from drinkingbird.llm.ollama import OllamaProvider
 from drinkingbird.llm.openai import OpenAIProvider
+from drinkingbird.tracing import Tracer
 
 
 def get_llm_provider(config: Config) -> LLMProvider | None:
@@ -56,6 +57,7 @@ def get_hook(
     event_name: str,
     config: Config,
     llm_provider: LLMProvider | None,
+    tracer: Tracer | None = None,
 ) -> Hook | None:
     """Get the appropriate hook for an event."""
     hooks_config = config.hooks
@@ -76,7 +78,7 @@ def get_hook(
     if not getattr(hook_config, "enabled", True):
         return None
 
-    return hook_class(config=hook_config, llm_provider=llm_provider)
+    return hook_class(config=hook_config, llm_provider=llm_provider, tracer=tracer)
 
 
 class Supervisor:
@@ -107,6 +109,9 @@ class Supervisor:
 
         # Initialize LLM provider
         self.llm_provider = get_llm_provider(self.config)
+
+        # Initialize tracer
+        self.tracer = Tracer(self.config.tracing)
 
     def debug(self, msg: str) -> None:
         """Log debug message."""
@@ -156,21 +161,41 @@ class Supervisor:
         event_name = hook_input.get("hook_event_name", "")
         self.debug(f"Handling event: {event_name}")
 
-        # Get appropriate hook
-        hook = get_hook(event_name, self.config, self.llm_provider)
+        # Get appropriate hook (pass tracer for LLM tracing)
+        hook = get_hook(event_name, self.config, self.llm_provider, self.tracer)
 
         if hook is None:
             self.debug(f"No handler for event: {event_name}")
             return HookResult.allow(f"No handler for {event_name}")
 
-        # Execute hook
-        try:
-            result = hook.handle(hook_input, self.debug)
-            self.debug(f"Hook result: {result.decision.value}")
-            return result
-        except Exception as e:
-            self.log_error(f"Hook {event_name} failed", e)
-            return HookResult.allow(f"Hook failed: {e}")
+        # Execute hook within trace context
+        trace_metadata = {
+            "hook": event_name,
+            "llm_provider": self.config.llm.provider,
+            "llm_model": self.config.llm.model,
+        }
+
+        with self.tracer.trace(f"bdb_{event_name.lower()}", metadata=trace_metadata):
+            try:
+                result = hook.handle(hook_input, self.debug)
+                self.debug(f"Hook result: {result.decision.value}")
+
+                # Log decision as score
+                self.tracer.score(
+                    name="decision",
+                    value=result.decision.value,
+                    comment=result.reason,
+                )
+
+                return result
+            except Exception as e:
+                self.log_error(f"Hook {event_name} failed", e)
+                self.tracer.event(
+                    name="hook_error",
+                    metadata={"error": str(e), "hook": event_name},
+                    level="ERROR",
+                )
+                return HookResult.allow(f"Hook failed: {e}")
 
     def run_stdin(self) -> None:
         """Run supervisor reading from stdin, writing to stdout.

@@ -53,6 +53,8 @@ bdb install claude-code  # or cursor, copilot
 
 Configuration lives in `~/.bdbrc` (YAML format with 600 permissions for security).
 
+See [config.example.yaml](config.example.yaml) for a complete example with all options.
+
 ```yaml
 # LLM Provider
 llm:
@@ -256,6 +258,45 @@ Enable debug mode:
 ```bash
 BDB_DEBUG=1 bdb run
 ```
+
+## Tracing (Langfuse)
+
+BDB supports [Langfuse](https://langfuse.com) for observability and cost tracking. Each hook invocation creates a trace with:
+
+- LLM generations with exact model identification
+- Token usage (input/output) for cost calculation
+- Decision scores (allow/block/kill)
+- Error events
+
+### Setup
+
+```yaml
+# In ~/.bdbrc
+tracing:
+  enabled: true
+  # Use environment variables (recommended)
+  public_key_env: LANGFUSE_PUBLIC_KEY
+  secret_key_env: LANGFUSE_SECRET_KEY
+  # Or direct keys
+  # public_key: pk-lf-...
+  # secret_key: sk-lf-...
+  host: https://cloud.langfuse.com  # or self-hosted URL
+```
+
+Set your environment variables:
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+```
+
+### What Gets Traced
+
+| Hook | Trace Name | Generations |
+|------|-----------|-------------|
+| Stop | `bdb_stop` | `evaluate_stop_decision` |
+| Tool Failure | `bdb_posttoolusefailure` | `generate_recovery_advice` |
+
+Each trace includes the actual model returned by the API (not just the requested model), ensuring accurate cost attribution even when using model aliases or fallbacks.
 
 ## License
 

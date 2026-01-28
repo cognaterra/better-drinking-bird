@@ -112,6 +112,20 @@ class StopHook(Hook):
         )
         debug(f"LLM response: {response.content}")
 
+        # Log generation to tracer
+        if self.tracer:
+            self.tracer.generation(
+                name="evaluate_stop_decision",
+                model=response.model or self.llm_provider.model or "unknown",
+                input_data={
+                    "system_prompt": SYSTEM_PROMPT,
+                    "user_prompt": user_prompt,
+                },
+                output_data=response.content,
+                usage=response.usage.to_dict() if response.usage else None,
+                metadata={"response_schema": RESPONSE_SCHEMA},
+            )
+
         decision = response.content.get("decision", "allow")
 
         if decision == "block":

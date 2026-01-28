@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from drinkingbird.llm.base import LLMProvider, LLMResponse
+from drinkingbird.llm.base import LLMProvider, LLMResponse, TokenUsage
 
 
 class OpenAIProvider(LLMProvider):
@@ -76,7 +76,23 @@ class OpenAIProvider(LLMProvider):
                 content_str = result["choices"][0]["message"]["content"]
                 content = json.loads(content_str)
 
-                return LLMResponse(content=content, raw_response=result)
+                # Extract token usage
+                usage = None
+                if "usage" in result:
+                    usage = TokenUsage(
+                        input=result["usage"].get("prompt_tokens", 0),
+                        output=result["usage"].get("completion_tokens", 0),
+                    )
+
+                # Get actual model used (may differ from requested)
+                actual_model = result.get("model", self.model)
+
+                return LLMResponse(
+                    content=content,
+                    raw_response=result,
+                    model=actual_model,
+                    usage=usage,
+                )
 
         except httpx.HTTPStatusError as e:
             return LLMResponse(
