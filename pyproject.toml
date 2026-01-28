@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "better-drinking-bird"
-version = "0.1.0"
+version = "0.2.1"
 description = "Supervisor for AI coding agents - keeps them on task like Homer's drinking bird"
 readme = "README.md"
 license = "MIT"
