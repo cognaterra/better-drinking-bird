@@ -367,6 +367,68 @@ def status() -> None:
 
 
 @main.command()
+@click.option("--global", "use_global", is_flag=True, help="Check all installations (not just current workspace)")
+@click.option("--fix", "do_fix", is_flag=True, help="Automatically fix detected issues")
+def doctor(use_global: bool, do_fix: bool) -> None:
+    """Diagnose and fix installation health.
+
+    Compares the installation manifest against actual config files
+    to find discrepancies:
+
+    \b
+    - Manifest entries where config/hooks are missing
+    - Config files with bdb hooks not tracked in manifest
+    - Unknown or stale manifest entries
+
+    By default, only checks the current workspace (local scope).
+    Use --global to check all installations.
+
+    Use --fix to automatically repair issues:
+
+    \b
+    - Removes stale manifest entries
+    - Adds untracked installations to manifest
+    """
+    from drinkingbird.doctor import diagnose_global, diagnose_local, fix_issues
+
+    if use_global:
+        click.echo("Checking all installations...")
+        issues = diagnose_global()
+    else:
+        workspace = get_workspace_root()
+        if workspace:
+            click.echo(f"Checking workspace: {workspace}")
+            issues = diagnose_local(workspace)
+        else:
+            click.echo("Not in a git repository. Use --global to check all installations.")
+            sys.exit(1)
+
+    if not issues:
+        click.echo()
+        click.echo("No issues found. Installation is healthy.")
+        return
+
+    click.echo()
+    click.echo(f"Found {len(issues)} issue(s):")
+    click.echo()
+
+    for issue in issues:
+        click.echo(f"  {issue}")
+
+    if do_fix:
+        click.echo()
+        click.echo("Applying fixes...")
+        fixes = fix_issues(issues)
+        for fix in fixes:
+            click.echo(f"  ✓ {fix}")
+        click.echo()
+        click.echo("Fixes applied. Run 'bdb doctor' again to verify.")
+    else:
+        click.echo()
+        click.echo("Run 'bdb doctor --fix' to automatically fix these issues.")
+
+
+@main.command()
 def check() -> None:
     """Validate configuration and connectivity.
 
