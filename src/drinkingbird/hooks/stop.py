@@ -65,11 +65,6 @@ class StopHook(Hook):
         """Handle stop hook event."""
         debug(f"Stop hook: LLM configured: {self.llm_provider is not None}")
 
-        # Loop prevention
-        if hook_input.get("stop_hook_active"):
-            debug("stop_hook_active=true, allowing")
-            return HookResult.allow("Loop prevention")
-
         transcript_path = hook_input.get("transcript_path", "")
         cwd = hook_input.get("cwd", os.getcwd())
         conversation_depth = getattr(self.config, "conversation_depth", 1)
