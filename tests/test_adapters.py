@@ -605,3 +605,26 @@ def test_adapter_exports():
 
     assert hasattr(adapters, "KiloCodeAdapter")
     assert hasattr(adapters, "ClineAdapter")
+
+
+class TestCLI:
+    """Tests for CLI adapter integration."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from click.testing import CliRunner
+        self.runner = CliRunner()
+
+    def test_install_kilo_code_dry_run(self):
+        """Test install command accepts kilo-code."""
+        from drinkingbird.cli import main
+        result = self.runner.invoke(main, ["install", "kilo-code", "--dry-run"])
+        assert result.exit_code == 0
+        assert "kilo-code" in result.output
+
+    def test_install_cline_dry_run(self):
+        """Test install command accepts cline."""
+        from drinkingbird.cli import main
+        result = self.runner.invoke(main, ["install", "cline", "--dry-run"])
+        assert result.exit_code == 0
+        assert "cline" in result.output

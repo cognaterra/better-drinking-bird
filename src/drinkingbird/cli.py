@@ -57,7 +57,7 @@ def init(force: bool) -> None:
 
 
 @main.command()
-@click.argument("agent", type=click.Choice(["claude-code", "cursor", "copilot", "stdin"]))
+@click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]))
 @click.option(
     "--dry-run", "-n",
     is_flag=True,
@@ -71,15 +71,19 @@ def install(agent: str, dry_run: bool) -> None:
     """
     from drinkingbird.adapters import (
         ClaudeCodeAdapter,
+        ClineAdapter,
         CopilotAdapter,
         CursorAdapter,
+        KiloCodeAdapter,
         StdinAdapter,
     )
 
     adapters = {
         "claude-code": ClaudeCodeAdapter,
-        "cursor": CursorAdapter,
+        "cline": ClineAdapter,
         "copilot": CopilotAdapter,
+        "cursor": CursorAdapter,
+        "kilo-code": KiloCodeAdapter,
         "stdin": StdinAdapter,
     }
 
@@ -241,7 +245,7 @@ def check() -> None:
 @main.command()
 @click.option(
     "--adapter", "-a",
-    type=click.Choice(["claude-code", "cursor", "copilot", "stdin"]),
+    type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]),
     default="claude-code",
     help="Adapter to use for input/output format",
 )
@@ -261,8 +265,10 @@ def run(adapter: str, debug: bool) -> None:
 
     from drinkingbird.adapters import (
         ClaudeCodeAdapter,
+        ClineAdapter,
         CopilotAdapter,
         CursorAdapter,
+        KiloCodeAdapter,
         StdinAdapter,
     )
     from drinkingbird.supervisor import Supervisor
@@ -272,8 +278,10 @@ def run(adapter: str, debug: bool) -> None:
 
     adapters = {
         "claude-code": ClaudeCodeAdapter,
-        "cursor": CursorAdapter,
+        "cline": ClineAdapter,
         "copilot": CopilotAdapter,
+        "cursor": CursorAdapter,
+        "kilo-code": KiloCodeAdapter,
         "stdin": StdinAdapter,
     }
 
