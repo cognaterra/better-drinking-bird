@@ -233,6 +233,19 @@ llm:
   base_url: http://localhost:11434  # optional
 ```
 
+### Azure OpenAI
+```yaml
+llm:
+  provider: azure
+  model: gpt-4o-mini  # Actual model name (for Langfuse cost tracking)
+  deployment: my-gpt4o-deployment  # Azure deployment name
+  base_url: https://your-resource.openai.azure.com
+  api_key_env: AZURE_OPENAI_API_KEY
+  api_version: 2024-08-01-preview  # optional
+```
+
+**Note:** Azure OpenAI uses deployment names for API calls, but you must specify the actual `model` name (e.g., `gpt-4o-mini`) for accurate cost tracking in Langfuse.
+
 ## Development
 
 ```bash

@@ -22,6 +22,8 @@ DEFAULT_CONFIG = {
         "api_key_env": None,
         "base_url": None,
         "timeout": 30,
+        "deployment": None,
+        "api_version": "2024-08-01-preview",
     },
     "agent": {
         "type": "claude-code",
@@ -87,6 +89,9 @@ class LLMConfig:
     api_key_env: str | None = None
     base_url: str | None = None
     timeout: int = 30
+    # Azure OpenAI specific
+    deployment: str | None = None  # Azure deployment name
+    api_version: str = "2024-08-01-preview"  # Azure API version
 
     def get_api_key(self) -> str | None:
         """Get API key from config or environment variable."""
@@ -98,6 +103,7 @@ class LLMConfig:
         env_vars = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
+            "azure": "AZURE_OPENAI_API_KEY",
         }
         if self.provider in env_vars:
             return os.environ.get(env_vars[self.provider])
@@ -332,12 +338,15 @@ def generate_template() -> str:
 
 # LLM Provider Configuration
 llm:
-  provider: openai  # openai | anthropic | ollama
+  provider: openai  # openai | anthropic | ollama | azure
   model: gpt-4o-mini
   api_key: null  # Or set api_key_env to use an environment variable
   # api_key_env: OPENAI_API_KEY
   # base_url: null  # For custom endpoints
   timeout: 30
+  # Azure OpenAI specific (required when provider: azure)
+  # deployment: my-deployment-name  # Azure deployment name
+  # api_version: 2024-08-01-preview
 
 # Agent Configuration
 agent:

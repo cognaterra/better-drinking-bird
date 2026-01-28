@@ -3,7 +3,7 @@
 
 # LLM Provider Configuration
 llm:
-  provider: openai  # openai | anthropic | ollama
+  provider: openai  # openai | anthropic | ollama | azure
   model: gpt-4o-mini
   # Direct API key (not recommended - use env var instead)
   # api_key: sk-your-key-here
@@ -12,6 +12,9 @@ llm:
   # Custom endpoint (optional)
   # base_url: https://api.openai.com/v1
   timeout: 30
+  # Azure OpenAI specific (required when provider: azure)
+  # deployment: my-gpt4o-deployment  # Azure deployment name
+  # api_version: 2024-08-01-preview  # Azure API version
 
 # Agent Configuration
 agent:

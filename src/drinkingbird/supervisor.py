@@ -25,6 +25,7 @@ from drinkingbird.hooks import (
 )
 from drinkingbird.llm import LLMProvider
 from drinkingbird.llm.anthropic import AnthropicProvider
+from drinkingbird.llm.azure import AzureOpenAIProvider
 from drinkingbird.llm.ollama import OllamaProvider
 from drinkingbird.llm.openai import OpenAIProvider
 from drinkingbird.tracing import Tracer
@@ -34,6 +35,17 @@ def get_llm_provider(config: Config) -> LLMProvider | None:
     """Create LLM provider from config."""
     llm_config = config.llm
     api_key = llm_config.get_api_key()
+
+    # Azure OpenAI needs special handling for deployment/api_version
+    if llm_config.provider == "azure":
+        return AzureOpenAIProvider(
+            api_key=api_key,
+            model=llm_config.model,
+            base_url=llm_config.base_url,
+            timeout=llm_config.timeout,
+            deployment=llm_config.deployment,
+            api_version=llm_config.api_version,
+        )
 
     providers = {
         "openai": OpenAIProvider,
