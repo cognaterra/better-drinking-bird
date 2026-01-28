@@ -76,6 +76,11 @@ class AzureOpenAIProvider(LLMProvider):
                 raw_response=None,
             )
 
+        # Azure strict mode requires additionalProperties: false
+        schema = dict(response_schema)
+        if "additionalProperties" not in schema:
+            schema["additionalProperties"] = False
+
         request_body = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -86,10 +91,9 @@ class AzureOpenAIProvider(LLMProvider):
                 "json_schema": {
                     "name": "response",
                     "strict": True,
-                    "schema": response_schema,
+                    "schema": schema,
                 },
             },
-            "temperature": 0,
         }
 
         # Azure OpenAI URL format
