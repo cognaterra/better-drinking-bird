@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,6 +109,26 @@ class LLMConfig:
         if self.provider in env_vars:
             return os.environ.get(env_vars[self.provider])
         return None
+
+
+@dataclass
+class BlocklistEntry:
+    """A user-configured blocklist pattern."""
+
+    pattern: str
+    reason: str
+    tools: list[str] = field(default_factory=lambda: ["*"])
+    _compiled: re.Pattern | None = field(default=None, repr=False)
+
+    def get_compiled_pattern(self) -> re.Pattern:
+        """Get compiled regex, caching for performance."""
+        if self._compiled is None:
+            self._compiled = re.compile(self.pattern, re.IGNORECASE)
+        return self._compiled
+
+    def matches_tool(self, tool_name: str) -> bool:
+        """Check if this entry applies to the given tool."""
+        return "*" in self.tools or tool_name in self.tools
 
 
 @dataclass
