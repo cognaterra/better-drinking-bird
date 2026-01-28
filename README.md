@@ -2,8 +2,6 @@
 
 Homer's drinking bird for AI coding agents.
 
-<img src="https://upload.wikimedia.org/wikipedia/en/c/c5/Simpsons_05_09_P1.jpg" alt="Homer's drinking bird pressing Y on keyboard" width="400"/>
-
 *"King-Size Homer" - The Simpsons, Season 7, Episode 7*
 
 In the famous Simpsons episode, Homer uses a drinking bird toy to repeatedly press a key on his keyboard, keeping his work going while he's away. **Better Drinking Bird** does the same for AI coding agents - it keeps them on task, nudging them back to work when they try to stop prematurely.
