@@ -351,3 +351,42 @@ class TestStopHook:
         assert len(result) == 1
         assert "Check @file1.py" in result[0]
         assert "and @file2.py" in result[0]
+
+    def test_stop_hook_active_flag_ignored(self):
+        """Test that stop_hook_active flag is ignored.
+
+        Every stop request should be evaluated independently. The flag should
+        not cause the hook to bypass evaluation and auto-allow.
+        """
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        # Create a hook with a mock LLM that would normally evaluate
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = False
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        # Create hook input with the flag set
+        hook_input = {
+            "stop_hook_active": True,
+            "transcript_path": "",
+            "cwd": "/tmp",
+        }
+
+        debug_messages = []
+        def debug(msg):
+            debug_messages.append(msg)
+
+        # Call the hook
+        result = hook.handle(hook_input, debug)
+
+        # The hook should NOT bypass evaluation due to the flag
+        # It should proceed with normal evaluation (which returns allow for no transcript)
+        assert result.decision == Decision.ALLOW
+        assert result.reason == "No messages in transcript"
+
+        # Verify the flag was NOT checked (no "stop_hook_active=true" in debug)
+        debug_text = " ".join(debug_messages)
+        assert "stop_hook_active" not in debug_text.lower()
