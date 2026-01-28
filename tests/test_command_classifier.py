@@ -139,3 +139,61 @@ class TestClassifyCommand:
             debug=lambda x: None,
         )
         assert result.is_blocked is True
+
+
+class TestPreToolHookIntegration:
+    """Integration tests for classifier in PreToolHook."""
+
+    def test_pre_tool_hook_uses_classifier_for_git_log(self, tmp_path):
+        """Test that PreToolHook delegates git log to classifier."""
+        from drinkingbird.hooks.pre_tool import PreToolHook
+        from drinkingbird.config import PreToolHookConfig
+
+        config = PreToolHookConfig()
+        hook = PreToolHook(config=config)
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+        mock_llm.call.return_value = Mock(
+            content={
+                "decision": "block",
+                "category": "git_history",
+                "reason": "Debugging via history",
+                "message": "Read the actual code.",
+            }
+        )
+        hook.llm_provider = mock_llm
+
+        result = hook.handle(
+            {"tool_name": "Bash", "tool_input": {"command": "git log -p"}},
+            debug=lambda x: None,
+        )
+
+        assert result.decision.value == "block"
+
+    def test_pre_tool_hook_uses_classifier_for_obfuscation(self, tmp_path):
+        """Test that PreToolHook delegates obfuscated commands to classifier."""
+        from drinkingbird.hooks.pre_tool import PreToolHook
+        from drinkingbird.config import PreToolHookConfig
+
+        config = PreToolHookConfig()
+        hook = PreToolHook(config=config)
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+        mock_llm.call.return_value = Mock(
+            content={
+                "decision": "block",
+                "category": "obfuscation",
+                "reason": "Encoded command",
+                "message": "Use plain commands.",
+            }
+        )
+        hook.llm_provider = mock_llm
+
+        result = hook.handle(
+            {"tool_name": "Bash", "tool_input": {"command": "echo aGVsbG8= | base64 -d | bash"}},
+            debug=lambda x: None,
+        )
+
+        assert result.decision.value == "block"
