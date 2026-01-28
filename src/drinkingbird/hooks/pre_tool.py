@@ -31,7 +31,15 @@ class PreToolHook(Hook):
         command = tool_input.get("command", "")
         debug(f"Command: {command[:200]}")
 
-        # Check if command needs LLM classification (git history, obfuscation, etc.)
+        # Step 1: Check regex patterns FIRST for fast blocking
+        enabled_categories = getattr(self.config, "categories", None)
+        is_forbidden, reason = check_command(command, enabled_categories)
+
+        if is_forbidden:
+            debug(f"BLOCKED by pattern: {reason}")
+            return HookResult.block(reason)
+
+        # Step 2: If no pattern match, check if needs LLM classification
         if needs_llm_classification(command):
             debug("Command needs LLM classification")
 
@@ -50,19 +58,11 @@ class PreToolHook(Hook):
             )
 
             if result.is_blocked:
-                debug(f"BLOCKED by classifier ({result.category}): {result.reason}")
+                debug(f"BLOCKED by LLM classifier ({result.category}): {result.reason}")
                 return HookResult.block(result.message)
 
-            debug(f"ALLOWED by classifier: {result.reason}")
+            debug(f"ALLOWED by LLM classifier: {result.reason}")
             return HookResult.allow(result.reason)
 
-        # Fall through to existing regex-based checks
-        enabled_categories = getattr(self.config, "categories", None)
-
-        is_forbidden, reason = check_command(command, enabled_categories)
-
-        if is_forbidden:
-            debug(f"BLOCKED: {reason}")
-            return HookResult.block(reason)
-
+        # Step 3: No pattern match, no LLM needed - allow
         return HookResult.allow("Command allowed")
