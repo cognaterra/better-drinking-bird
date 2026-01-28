@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from drinkingbird.adapters.claude_code import ClaudeCodeAdapter
+from drinkingbird.adapters.kilo_code import KiloCodeAdapter
 
 
 class TestClaudeCodeAdapter:
@@ -491,3 +492,45 @@ class TestClaudeCodeAdapterUninstall:
         config = json.loads(config_path.read_text())
         assert "Stop" not in config["hooks"]
         assert "PreToolUse" in config["hooks"]
+
+
+class TestKiloCodeAdapter:
+    """Tests for KiloCodeAdapter."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.adapter = KiloCodeAdapter()
+
+    def test_agent_name(self):
+        """Test agent name is correct."""
+        assert self.adapter.agent_name == "kilo-code"
+
+    def test_config_path(self):
+        """Test config path points to kilocode settings."""
+        path = self.adapter.get_config_path()
+        assert path == Path.home() / ".kilocode" / "settings.json"
+
+    def test_parse_input_passthrough(self):
+        """Test input is passed through unchanged."""
+        raw = {
+            "hook_event_name": "Stop",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/project",
+        }
+        result = self.adapter.parse_input(raw)
+        assert result == raw
+
+    def test_format_output_passthrough(self):
+        """Test output is passed through unchanged."""
+        result = {"decision": "block", "reason": "test"}
+        output = self.adapter.format_output(result, "Stop")
+        assert output == result
+
+    def test_install_config_has_all_hooks(self):
+        """Test install config includes all hook types."""
+        config = self.adapter.get_install_config()
+        assert "hooks" in config
+        assert "Stop" in config["hooks"]
+        assert "PreToolUse" in config["hooks"]
+        assert "PostToolUseFailure" in config["hooks"]
+        assert "PreCompact" in config["hooks"]
