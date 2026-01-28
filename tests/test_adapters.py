@@ -7,6 +7,7 @@ import pytest
 
 from drinkingbird.adapters.claude_code import ClaudeCodeAdapter
 from drinkingbird.adapters.kilo_code import KiloCodeAdapter
+from drinkingbird.adapters.cline import ClineAdapter
 
 
 class TestClaudeCodeAdapter:
@@ -534,3 +535,65 @@ class TestKiloCodeAdapter:
         assert "PreToolUse" in config["hooks"]
         assert "PostToolUseFailure" in config["hooks"]
         assert "PreCompact" in config["hooks"]
+
+
+class TestClineAdapter:
+    """Tests for ClineAdapter."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.adapter = ClineAdapter()
+
+    def test_agent_name(self):
+        """Test agent name is correct."""
+        assert self.adapter.agent_name == "cline"
+
+    def test_config_path(self):
+        """Test config path points to Cline hooks directory."""
+        path = self.adapter.get_config_path()
+        assert path == Path.home() / "Documents" / "Cline" / "Hooks"
+
+    def test_parse_input_maps_task_complete_to_stop(self):
+        """Test TaskComplete is mapped to Stop."""
+        raw = {
+            "hookName": "TaskComplete",
+            "taskId": "abc123",
+            "workspaceRoots": ["/project"],
+        }
+        result = self.adapter.parse_input(raw)
+        assert result["hook_event_name"] == "Stop"
+
+    def test_parse_input_maps_pre_tool_use(self):
+        """Test PreToolUse passes through."""
+        raw = {
+            "hookName": "PreToolUse",
+            "toolName": "execute_command",
+            "toolInput": {"command": "git status"},
+        }
+        result = self.adapter.parse_input(raw)
+        assert result["hook_event_name"] == "PreToolUse"
+        assert result["tool_name"] == "Bash"
+        assert result["tool_input"]["command"] == "git status"
+
+    def test_format_output_block(self):
+        """Test block decision is formatted for Cline."""
+        result = {"decision": "block", "reason": "Get back to work"}
+        output = self.adapter.format_output(result, "Stop")
+        assert output["cancel"] is True
+        assert output["reason"] == "Get back to work"
+
+    def test_format_output_allow(self):
+        """Test allow decision returns empty or minimal response."""
+        result = {}
+        output = self.adapter.format_output(result, "Stop")
+        assert output.get("cancel") is not True
+
+    def test_format_output_context(self):
+        """Test context injection uses contextModification."""
+        result = {
+            "hookSpecificOutput": {
+                "additionalContext": "Remember the plan"
+            }
+        }
+        output = self.adapter.format_output(result, "PreCompact")
+        assert output["contextModification"] == "Remember the plan"
