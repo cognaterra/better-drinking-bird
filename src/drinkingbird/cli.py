@@ -491,6 +491,7 @@ def check() -> None:
                         "type": "object",
                         "properties": {"status": {"type": "string"}},
                         "required": ["status"],
+                        "additionalProperties": False,
                     },
                 )
                 if response.success:

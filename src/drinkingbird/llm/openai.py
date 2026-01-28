@@ -57,7 +57,6 @@ class OpenAIProvider(LLMProvider):
                     "schema": response_schema,
                 },
             },
-            "temperature": 0,
         }
 
         try:
@@ -95,8 +94,14 @@ class OpenAIProvider(LLMProvider):
                 )
 
         except httpx.HTTPStatusError as e:
+            # Include the actual error message from the API
+            try:
+                error_body = e.response.json()
+                error_msg = error_body.get("error", {}).get("message", str(error_body))
+            except Exception:
+                error_msg = e.response.text or f"HTTP {e.response.status_code}"
             return LLMResponse(
-                content={"error": f"HTTP error: {e.response.status_code}"},
+                content={"error": error_msg},
                 raw_response=None,
             )
         except httpx.TimeoutException:
