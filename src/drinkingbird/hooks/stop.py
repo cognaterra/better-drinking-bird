@@ -89,9 +89,17 @@ class StopHook(Hook):
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")
 
-        # Extract @mentions and read files
-        mentions = self._extract_mentions(first_user) if first_user else []
-        files = self._read_mentioned_files(mentions, cwd)
+        # Extract @mentions from ALL user messages (deduplicated)
+        all_user_messages = self._extract_all_user_messages(messages)
+        all_mentions: list[str] = []
+        seen: set[str] = set()
+        for user_msg in all_user_messages:
+            for mention in self._extract_mentions(user_msg):
+                if mention not in seen:
+                    all_mentions.append(mention)
+                    seen.add(mention)
+
+        files = self._read_mentioned_files(all_mentions, cwd)
 
         # Build prompt
         user_prompt = self._build_user_prompt(
@@ -162,12 +170,9 @@ class StopHook(Hook):
 
         return messages
 
-    def _extract_user_messages(
-        self, messages: list[dict]
-    ) -> tuple[str | None, str | None]:
-        """Extract first and last user messages from transcript."""
+    def _extract_all_user_messages(self, messages: list[dict]) -> list[str]:
+        """Extract all user messages from transcript."""
         user_messages = []
-
         for msg in messages:
             if msg.get("role") == "user":
                 content = msg.get("content", "")
@@ -183,7 +188,13 @@ class StopHook(Hook):
             elif msg.get("type") == "human":
                 content = msg.get("message", "")
                 user_messages.append(content)
+        return user_messages
 
+    def _extract_user_messages(
+        self, messages: list[dict]
+    ) -> tuple[str | None, str | None]:
+        """Extract first and last user messages from transcript."""
+        user_messages = self._extract_all_user_messages(messages)
         first_user = user_messages[0] if user_messages else None
         last_user = user_messages[-1] if user_messages else None
         return first_user, last_user
@@ -272,7 +283,7 @@ class StopHook(Hook):
         if files:
             parts.append("\n=== REFERENCED FILES ===")
             for path, content in files.items():
-                parts.append(f"\n--- {path} ---")
+                parts.append(f"\n--- @{path} ---")
                 if len(content) > 10000:
                     content = content[:10000] + "\n... [truncated]"
                 parts.append(content)
