@@ -113,6 +113,55 @@ def install(agent: str, dry_run: bool) -> None:
 
 
 @main.command()
+@click.argument("agent", type=click.Choice(["claude-code", "cursor", "copilot", "stdin"]))
+@click.option(
+    "--dry-run", "-n",
+    is_flag=True,
+    help="Show what would be done without making changes",
+)
+def uninstall(agent: str, dry_run: bool) -> None:
+    """Uninstall hooks for an AI coding agent.
+
+    Removes Better Drinking Bird hooks from the specified agent's
+    configuration while preserving other hooks and settings.
+    """
+    from drinkingbird.adapters import (
+        ClaudeCodeAdapter,
+        CopilotAdapter,
+        CursorAdapter,
+        StdinAdapter,
+    )
+
+    adapters = {
+        "claude-code": ClaudeCodeAdapter,
+        "cursor": CursorAdapter,
+        "copilot": CopilotAdapter,
+        "stdin": StdinAdapter,
+    }
+
+    adapter_class = adapters[agent]
+    adapter = adapter_class()
+
+    config_path = adapter.get_config_path()
+
+    if dry_run:
+        click.echo(f"Would uninstall hooks for {agent}")
+        click.echo(f"Config path: {config_path}")
+        return
+
+    try:
+        success = adapter.uninstall()
+        if success:
+            click.echo(f"Uninstalled hooks for {agent}")
+            click.echo(f"Config updated: {config_path}")
+        else:
+            click.echo(f"No bdb hooks found for {agent}")
+    except Exception as e:
+        click.echo(f"Error uninstalling hooks: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
 def check() -> None:
     """Validate configuration and connectivity.
 

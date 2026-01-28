@@ -156,3 +156,8 @@ class StdinAdapter(Adapter):
         print(f"    echo '{{\"event\": \"stop\", ...}}' | {bdb_path} run --adapter stdin")
         print()
         return True
+
+    def uninstall(self) -> bool:
+        """Generic adapter doesn't install anywhere, so nothing to uninstall."""
+        print("Generic stdin/stdout adapter - no hooks installed.")
+        return False

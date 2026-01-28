@@ -120,3 +120,42 @@ class CursorAdapter(Adapter):
         config_path.write_text(json.dumps(existing, indent=2))
 
         return True
+
+    def uninstall(self) -> bool:
+        """Uninstall BDB hooks from Cursor."""
+        import json
+
+        config_path = self.get_config_path()
+
+        if not config_path.exists():
+            return False
+
+        try:
+            existing = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            return False
+
+        existing_hooks = existing.get("hooks", {})
+        if not existing_hooks:
+            return False
+
+        # Remove hooks that contain "bdb" in the command
+        found_bdb = False
+        for hook_name in list(existing_hooks.keys()):
+            hook_config = existing_hooks[hook_name]
+            if isinstance(hook_config, dict) and "bdb" in hook_config.get("command", ""):
+                del existing_hooks[hook_name]
+                found_bdb = True
+
+        if not found_bdb:
+            return False
+
+        # Update or remove hooks key
+        if existing_hooks:
+            existing["hooks"] = existing_hooks
+        else:
+            del existing["hooks"]
+
+        # Write back
+        config_path.write_text(json.dumps(existing, indent=2))
+        return True

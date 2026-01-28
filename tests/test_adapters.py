@@ -355,3 +355,139 @@ class TestClaudeCodeAdapterInstall:
                     assert "command" in hook, (
                         f"{event_name}[{i}]['hooks'][{j}] missing 'command'"
                     )
+
+
+class TestClaudeCodeAdapterUninstall:
+    """Tests for the uninstall method."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.adapter = ClaudeCodeAdapter()
+
+    def test_uninstall_removes_bdb_hooks(self, tmp_path):
+        """Test uninstall removes bdb hooks."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "/usr/bin/bdb run"}]}
+                ],
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "bdb run"}]}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is True
+        config = json.loads(config_path.read_text())
+        assert "hooks" not in config or not config.get("hooks")
+
+    def test_uninstall_preserves_non_bdb_hooks(self, tmp_path):
+        """Test uninstall preserves hooks that aren't from bdb."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "/usr/bin/bdb run"}]},
+                    {"hooks": [{"type": "command", "command": "my-custom-hook"}]},
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is True
+        config = json.loads(config_path.read_text())
+        assert "Stop" in config["hooks"]
+        assert len(config["hooks"]["Stop"]) == 1
+        assert config["hooks"]["Stop"][0]["hooks"][0]["command"] == "my-custom-hook"
+
+    def test_uninstall_preserves_other_settings(self, tmp_path):
+        """Test uninstall preserves non-hook settings."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps({
+            "includeCoAuthoredBy": True,
+            "permissions": {"allow": ["Read"]},
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "bdb run"}]}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        self.adapter.uninstall()
+
+        config = json.loads(config_path.read_text())
+        assert config["includeCoAuthoredBy"] is True
+        assert config["permissions"] == {"allow": ["Read"]}
+
+    def test_uninstall_returns_false_if_no_bdb_hooks(self, tmp_path):
+        """Test uninstall returns False if no bdb hooks found."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "other-hook"}]}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is False
+
+    def test_uninstall_returns_false_if_no_config_file(self, tmp_path):
+        """Test uninstall returns False if config file doesn't exist."""
+        config_path = tmp_path / "settings.json"
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is False
+
+    def test_uninstall_returns_false_if_no_hooks_section(self, tmp_path):
+        """Test uninstall returns False if config has no hooks section."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps({"includeCoAuthoredBy": True}))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is False
+
+    def test_uninstall_handles_malformed_json(self, tmp_path):
+        """Test uninstall handles malformed JSON gracefully."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text("{ invalid json }")
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is False
+
+    def test_uninstall_removes_empty_hook_types(self, tmp_path):
+        """Test uninstall removes hook types that become empty."""
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "bdb run"}]}
+                ],
+                "PreToolUse": [
+                    {"hooks": [{"type": "command", "command": "other-hook"}]}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        self.adapter.uninstall()
+
+        config = json.loads(config_path.read_text())
+        assert "Stop" not in config["hooks"]
+        assert "PreToolUse" in config["hooks"]

@@ -113,3 +113,44 @@ class CopilotAdapter(Adapter):
             yaml.dump(existing, f, default_flow_style=False)
 
         return True
+
+    def uninstall(self) -> bool:
+        """Uninstall BDB hooks from Copilot."""
+        import yaml
+
+        config_path = self.get_config_path()
+
+        if not config_path.exists():
+            return False
+
+        try:
+            with open(config_path) as f:
+                existing = yaml.safe_load(f) or {}
+        except yaml.YAMLError:
+            return False
+
+        existing_hooks = existing.get("hooks", {})
+        if not existing_hooks:
+            return False
+
+        # Remove hooks that contain "bdb" in the command
+        found_bdb = False
+        for hook_name in list(existing_hooks.keys()):
+            command = existing_hooks[hook_name]
+            if isinstance(command, str) and "bdb" in command:
+                del existing_hooks[hook_name]
+                found_bdb = True
+
+        if not found_bdb:
+            return False
+
+        # Update or remove hooks key
+        if existing_hooks:
+            existing["hooks"] = existing_hooks
+        else:
+            del existing["hooks"]
+
+        # Write back
+        with open(config_path, "w") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+        return True

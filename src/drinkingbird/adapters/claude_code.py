@@ -142,3 +142,51 @@ class ClaudeCodeAdapter(Adapter):
         config_path.write_text(json.dumps(existing, indent=2))
 
         return True
+
+    def uninstall(self) -> bool:
+        """Uninstall BDB hooks from Claude Code."""
+        config_path = self.get_config_path()
+
+        if not config_path.exists():
+            return False
+
+        try:
+            existing = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            return False
+
+        existing_hooks = existing.get("hooks", {})
+        if not existing_hooks:
+            return False
+
+        # Check for bdb hooks in nested structure
+        def has_bdb(entry: dict) -> bool:
+            for hook in entry.get("hooks", []):
+                if "bdb" in hook.get("command", ""):
+                    return True
+            return False
+
+        found_bdb = False
+        for hook_name in list(existing_hooks.keys()):
+            hook_list = existing_hooks[hook_name]
+            if isinstance(hook_list, list):
+                original_len = len(hook_list)
+                existing_hooks[hook_name] = [h for h in hook_list if not has_bdb(h)]
+                if len(existing_hooks[hook_name]) < original_len:
+                    found_bdb = True
+                # Remove empty hook lists
+                if not existing_hooks[hook_name]:
+                    del existing_hooks[hook_name]
+
+        if not found_bdb:
+            return False
+
+        # Update or remove hooks key
+        if existing_hooks:
+            existing["hooks"] = existing_hooks
+        else:
+            del existing["hooks"]
+
+        # Write back
+        config_path.write_text(json.dumps(existing, indent=2))
+        return True

@@ -113,3 +113,12 @@ class Adapter(ABC):
         for key, value in new.items():
             result[key] = value
         return result
+
+    @abstractmethod
+    def uninstall(self) -> bool:
+        """Uninstall BDB hooks for this agent.
+
+        Returns:
+            True if uninstallation succeeded, False if nothing to uninstall
+        """
+        pass
