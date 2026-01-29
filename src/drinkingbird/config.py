@@ -466,3 +466,26 @@ def save_template(path: Path | None = None) -> Path:
     config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     return config_path
+
+
+def ensure_config() -> Path:
+    """Ensure config file exists, creating it if necessary.
+
+    Handles legacy config migration from ~/.bdbrc to ~/.bdb/config.yaml.
+
+    Returns:
+        Path to the config file
+    """
+    import shutil
+
+    # Check for legacy config that needs migration
+    if LEGACY_CONFIG_PATH.exists() and not CONFIG_PATH.exists():
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(LEGACY_CONFIG_PATH), str(CONFIG_PATH))
+        return CONFIG_PATH
+
+    # Create config if it doesn't exist
+    if not CONFIG_PATH.exists():
+        save_template()
+
+    return CONFIG_PATH

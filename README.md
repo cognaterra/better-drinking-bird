@@ -35,16 +35,13 @@ pip install better-drinking-bird
 ## Quick Start
 
 ```bash
-# 1. Create config file
-bdb init
-
-# 2. Add your API key to ~/.bdbrc
-# (Edit the file and add your OpenAI/Anthropic key)
-
-# 3. Install hooks for your agent
+# 1. Install hooks for your agent (creates config automatically)
 bdb install claude-code  # or cursor, copilot
 
-# 4. Use your agent as normal - BDB supervises automatically
+# 2. Add your API key to ~/.bdb/config.yaml
+# (Edit the file and add your OpenAI/Anthropic key)
+
+# 3. Use your agent as normal - BDB supervises automatically
 ```
 
 ## Configuration
@@ -97,10 +94,7 @@ hooks:
 ## CLI Commands
 
 ```bash
-# Initialize config
-bdb init
-
-# Install hooks for an agent
+# Install hooks for an agent (creates config automatically)
 bdb install claude-code
 bdb install cursor
 bdb install copilot

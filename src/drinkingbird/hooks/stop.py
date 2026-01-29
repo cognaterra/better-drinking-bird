@@ -148,8 +148,8 @@ class StopHook(Hook):
 
         # Call LLM
         if not self.llm_provider or not self.llm_provider.is_configured():
-            debug("No LLM configured, allowing")
-            return HookResult.allow("No LLM configured")
+            debug("No LLM configured - allowing stop (run 'bdb check' for setup help)")
+            return HookResult.allow("No LLM configured - supervision disabled")
 
         debug("Calling LLM...")
         response = self.llm_provider.call(

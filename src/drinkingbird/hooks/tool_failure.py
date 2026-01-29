@@ -67,8 +67,10 @@ class ToolFailureHook(Hook):
 
         # Check if we have an LLM provider
         if not self.llm_provider or not self.llm_provider.is_configured():
+            debug("No LLM configured - using basic hint (run 'bdb check' for setup help)")
             return HookResult.with_context(
-                "[HINT (low)]: Check command syntax and try again!"
+                "[HINT (low)]: Check command syntax and try again! "
+                "(Note: Configure LLM in ~/.bdb/config.yaml for smarter hints)"
             )
 
         # Build prompt

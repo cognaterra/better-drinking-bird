@@ -13,9 +13,9 @@ from drinkingbird import __version__
 from drinkingbird.config import (
     CONFIG_PATH,
     ConfigError,
+    ensure_config,
     generate_template,
     load_config,
-    save_template,
 )
 from drinkingbird.pause import (
     GLOBAL_SENTINEL,
@@ -37,44 +37,6 @@ def main() -> None:
     pressing Enter on the keyboard.
     """
     pass
-
-
-@main.command()
-@click.option(
-    "--force", "-f",
-    is_flag=True,
-    help="Overwrite existing config file",
-)
-def init(force: bool) -> None:
-    """Initialize configuration file.
-
-    Creates ~/.bdb/config.yaml with default settings and secure permissions.
-    """
-    from drinkingbird.config import LEGACY_CONFIG_PATH
-
-    # Check for legacy config
-    if LEGACY_CONFIG_PATH.exists() and not CONFIG_PATH.exists():
-        click.echo(f"Found legacy config at {LEGACY_CONFIG_PATH}")
-        if click.confirm("Move to new location (~/.bdb/config.yaml)?"):
-            CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.move(str(LEGACY_CONFIG_PATH), str(CONFIG_PATH))
-            click.echo(f"Moved config to {CONFIG_PATH}")
-            return
-
-    if CONFIG_PATH.exists() and not force:
-        click.echo(f"Config file already exists: {CONFIG_PATH}")
-        click.echo("Use --force to overwrite.")
-        sys.exit(1)
-
-    path = save_template()
-    click.echo(f"Created config file: {path}")
-    click.echo("Edit this file to configure your API keys and settings.")
-    click.echo()
-    click.echo("Quick start:")
-    click.echo("  1. Add your API key to ~/.bdb/config.yaml")
-    click.echo("  2. Run: bdb install claude-code")
-    click.echo("  3. Start using Claude Code as normal")
 
 
 @main.command()
@@ -116,6 +78,9 @@ def install(agent: str, use_global: bool, dry_run: bool) -> None:
     adapter_class = adapters[agent]
     adapter = adapter_class()
 
+    # Ensure BDB config exists (auto-create if needed)
+    bdb_config_path = ensure_config()
+
     # Determine scope: local if in git repo (and supported), otherwise global
     workspace = get_workspace_root()
     if use_global or not workspace or not adapter.supports_local:
@@ -145,6 +110,9 @@ def install(agent: str, use_global: bool, dry_run: bool) -> None:
         if success:
             click.echo(f"Installed hooks for {agent} ({scope})")
             click.echo(f"Config updated: {config_path}")
+            click.echo()
+            click.echo(f"BDB config: {bdb_config_path}")
+            click.echo("Edit this file to add your API key if not already configured.")
 
             # Update manifest
             manifest = Manifest.load()
@@ -467,13 +435,9 @@ def check() -> None:
     """
     click.echo("Checking configuration...")
 
-    # Check config file
-    if not CONFIG_PATH.exists():
-        click.echo(f"  Config file: MISSING ({CONFIG_PATH})")
-        click.echo("  Run 'bdb init' to create one.")
-        sys.exit(1)
-
-    click.echo(f"  Config file: {CONFIG_PATH}")
+    # Ensure config file exists (auto-create if needed)
+    config_path = ensure_config()
+    click.echo(f"  Config file: {config_path}")
 
     # Load and validate config
     try:
@@ -497,8 +461,28 @@ def check() -> None:
         masked = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
         click.echo(f"  API key: {masked}")
     else:
-        click.echo("  API key: NOT CONFIGURED")
-        click.echo("  Add api_key or api_key_env to ~/.bdb/config.yaml")
+        click.secho("  API key: NOT CONFIGURED", fg="yellow")
+        click.echo()
+        click.echo("  BDB needs an LLM API key to evaluate agent behavior.")
+        click.echo("  Without it, hooks will allow all actions (no supervision).")
+        click.echo()
+        click.echo("  To configure, edit ~/.bdb/config.yaml:")
+        if config.llm.provider == "openai":
+            click.echo("    llm:")
+            click.echo("      api_key: sk-...")
+            click.echo("    Or set OPENAI_API_KEY environment variable")
+        elif config.llm.provider == "anthropic":
+            click.echo("    llm:")
+            click.echo("      api_key: sk-ant-...")
+            click.echo("    Or set ANTHROPIC_API_KEY environment variable")
+        elif config.llm.provider == "azure":
+            click.echo("    llm:")
+            click.echo("      api_key: ...")
+            click.echo("      base_url: https://your-resource.openai.azure.com")
+            click.echo("      deployment: your-deployment-name")
+        else:
+            click.echo("    llm:")
+            click.echo("      api_key: your-api-key-here")
 
     # Check LLM connectivity
     if api_key:
@@ -702,12 +686,8 @@ def config() -> None:
 @config.command("show")
 def config_show() -> None:
     """Show current configuration."""
-    if not CONFIG_PATH.exists():
-        click.echo(f"No config file found at {CONFIG_PATH}")
-        click.echo("Run 'bdb init' to create one.")
-        return
-
-    click.echo(CONFIG_PATH.read_text())
+    config_path = ensure_config()
+    click.echo(config_path.read_text())
 
 
 @config.command("template")
