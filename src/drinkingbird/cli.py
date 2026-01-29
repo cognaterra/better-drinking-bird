@@ -377,6 +377,13 @@ def status(use_global: bool) -> None:
     click.echo("BDB Installation Status")
     click.echo("=" * 40)
 
+    # Show pause status
+    paused, sentinel_path = is_paused()
+    if paused:
+        click.secho("⏸  PAUSED", fg="yellow", bold=True)
+        if sentinel_path:
+            click.echo(f"   {sentinel_path}")
+
     # Group by agent
     by_agent: dict[str, list] = {}
     for inst in installations:
