@@ -40,7 +40,7 @@ def main() -> None:
 
 
 @main.command()
-@click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]))
+@click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin", "windsurf"]))
 @click.option("--global", "use_global", is_flag=True, help="Install globally instead of locally")
 @click.option(
     "--dry-run", "-n",
@@ -56,26 +56,10 @@ def install(agent: str, use_global: bool, dry_run: bool) -> None:
     By default, installs locally if in a git repository, otherwise globally.
     Use --global to force global installation.
     """
-    from drinkingbird.adapters import (
-        ClaudeCodeAdapter,
-        ClineAdapter,
-        CopilotAdapter,
-        CursorAdapter,
-        KiloCodeAdapter,
-        StdinAdapter,
-    )
+    from drinkingbird.adapters import ADAPTER_MAP
     from drinkingbird.manifest import Manifest
 
-    adapters = {
-        "claude-code": ClaudeCodeAdapter,
-        "cline": ClineAdapter,
-        "copilot": CopilotAdapter,
-        "cursor": CursorAdapter,
-        "kilo-code": KiloCodeAdapter,
-        "stdin": StdinAdapter,
-    }
-
-    adapter_class = adapters[agent]
+    adapter_class = ADAPTER_MAP[agent]
     adapter = adapter_class()
 
     # Ensure BDB config exists (auto-create if needed)
@@ -127,7 +111,7 @@ def install(agent: str, use_global: bool, dry_run: bool) -> None:
 
 
 @main.command()
-@click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]), required=False)
+@click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin", "windsurf"]), required=False)
 @click.option("--global", "use_global", is_flag=True, help="Uninstall global hooks instead of local")
 @click.option("--all", "uninstall_all", is_flag=True, help="Uninstall all bdb hooks everywhere")
 @click.option(
@@ -149,14 +133,7 @@ def uninstall(
     By default, uninstalls locally if in a git repository.
     Use --global to uninstall global hooks, or --all for everything.
     """
-    from drinkingbird.adapters import (
-        ClaudeCodeAdapter,
-        ClineAdapter,
-        CopilotAdapter,
-        CursorAdapter,
-        KiloCodeAdapter,
-        StdinAdapter,
-    )
+    from drinkingbird.adapters import ADAPTER_MAP
     from drinkingbird.manifest import Manifest
 
     if uninstall_all and agent:
@@ -166,15 +143,6 @@ def uninstall(
     if not uninstall_all and not agent:
         click.echo("Either specify an agent or use --all", err=True)
         sys.exit(1)
-
-    adapters = {
-        "claude-code": ClaudeCodeAdapter,
-        "cline": ClineAdapter,
-        "copilot": CopilotAdapter,
-        "cursor": CursorAdapter,
-        "kilo-code": KiloCodeAdapter,
-        "stdin": StdinAdapter,
-    }
 
     manifest = Manifest.load()
 
@@ -193,11 +161,11 @@ def uninstall(
             return
 
         for inst in installations:
-            if inst.agent not in adapters:
+            if inst.agent not in ADAPTER_MAP:
                 click.echo(f"Unknown agent {inst.agent}, skipping", err=True)
                 continue
 
-            adapter = adapters[inst.agent]()
+            adapter = ADAPTER_MAP[inst.agent]()
             workspace = Path(inst.path).parent.parent if inst.scope == "local" else None
 
             try:
@@ -216,7 +184,7 @@ def uninstall(
         return
 
     # Single agent uninstall
-    adapter_class = adapters[agent]
+    adapter_class = ADAPTER_MAP[agent]
     adapter = adapter_class()
 
     # Determine scope: local if in git repo (unless --global), otherwise global
@@ -260,22 +228,16 @@ def agents() -> None:
     Shows all agents that BDB can integrate with, along with their
     integration method and local installation support.
     """
-    from drinkingbird.adapters import (
-        ClaudeCodeAdapter,
-        ClineAdapter,
-        CopilotAdapter,
-        CursorAdapter,
-        KiloCodeAdapter,
-        StdinAdapter,
-    )
+    from drinkingbird.adapters import ADAPTER_MAP
 
     agents_info = [
-        ("claude-code", ClaudeCodeAdapter(), "Claude Code editor", "Native hooks"),
-        ("cursor", CursorAdapter(), "Cursor editor", "Script-based hooks"),
-        ("copilot", CopilotAdapter(), "GitHub Copilot", "Shell command hooks"),
-        ("cline", ClineAdapter(), "Cline VS Code extension", "Script hooks"),
-        ("kilo-code", KiloCodeAdapter(), "Kilo Code extension", "Native hooks"),
-        ("stdin", StdinAdapter(), "Generic stdin/stdout", "Piped JSON"),
+        ("claude-code", ADAPTER_MAP["claude-code"](), "Claude Code editor", "Native hooks"),
+        ("cursor", ADAPTER_MAP["cursor"](), "Cursor editor", "Script-based hooks"),
+        ("copilot", ADAPTER_MAP["copilot"](), "GitHub Copilot", "Shell command hooks"),
+        ("cline", ADAPTER_MAP["cline"](), "Cline VS Code extension", "Script hooks"),
+        ("kilo-code", ADAPTER_MAP["kilo-code"](), "Kilo Code extension", "Native hooks"),
+        ("stdin", ADAPTER_MAP["stdin"](), "Generic stdin/stdout", "Piped JSON"),
+        ("windsurf", ADAPTER_MAP["windsurf"](), "Windsurf (Codeium) editor", "Cascade hooks"),
     ]
 
     click.echo("Supported Agents")
@@ -505,7 +467,7 @@ def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
 @main.command()
 @click.option(
     "--adapter", "-a",
-    type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]),
+    type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin", "windsurf"]),
     default="claude-code",
     help="Adapter to use for input/output format",
 )
@@ -523,29 +485,13 @@ def run(adapter: str, debug: bool) -> None:
     """
     import os
 
-    from drinkingbird.adapters import (
-        ClaudeCodeAdapter,
-        ClineAdapter,
-        CopilotAdapter,
-        CursorAdapter,
-        KiloCodeAdapter,
-        StdinAdapter,
-    )
+    from drinkingbird.adapters import ADAPTER_MAP
     from drinkingbird.supervisor import Supervisor
 
     if debug:
         os.environ["BDB_DEBUG"] = "1"
 
-    adapters = {
-        "claude-code": ClaudeCodeAdapter,
-        "cline": ClineAdapter,
-        "copilot": CopilotAdapter,
-        "cursor": CursorAdapter,
-        "kilo-code": KiloCodeAdapter,
-        "stdin": StdinAdapter,
-    }
-
-    adapter_instance = adapters[adapter]()
+    adapter_instance = ADAPTER_MAP[adapter]()
 
     # Read input
     try:
@@ -575,8 +521,15 @@ def run(adapter: str, debug: bool) -> None:
         hook_input.get("hook_event_name", ""),
     )
 
+    # Handle exit codes for adapters that use them (e.g., Windsurf)
+    exit_code = output.pop("_windsurf_exit_code", None) if output else None
+
     if output:
         print(json.dumps(output))
+
+    # Exit with appropriate code for adapters that use exit codes for blocking
+    if exit_code is not None:
+        sys.exit(exit_code)
 
 
 @main.command()

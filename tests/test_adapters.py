@@ -599,12 +599,359 @@ class TestClineAdapter:
         assert output["contextModification"] == "Remember the plan"
 
 
+class TestWindsurfAdapter:
+    """Tests for WindsurfAdapter."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from drinkingbird.adapters.windsurf import WindsurfAdapter
+        self.adapter = WindsurfAdapter()
+
+    def test_agent_name(self):
+        """Test agent name is correct."""
+        assert self.adapter.agent_name == "windsurf"
+
+    def test_supports_local(self):
+        """Test adapter supports local installation."""
+        assert self.adapter.supports_local is True
+
+    def test_uses_exit_codes(self):
+        """Test adapter uses exit codes for blocking."""
+        assert self.adapter.uses_exit_codes is True
+
+    def test_config_path(self):
+        """Test config path points to Codeium windsurf hooks."""
+        path = self.adapter.get_config_path()
+        assert path == Path.home() / ".codeium" / "windsurf" / "hooks.json"
+
+    def test_local_config_path(self, tmp_path):
+        """Test local config path."""
+        path = self.adapter.get_local_config_path(tmp_path)
+        assert path == tmp_path / ".windsurf" / "hooks.json"
+
+
+class TestWindsurfAdapterParseInput:
+    """Tests for Windsurf input parsing."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from drinkingbird.adapters.windsurf import WindsurfAdapter
+        self.adapter = WindsurfAdapter()
+
+    def test_parse_pre_run_command(self):
+        """Test pre_run_command is mapped to PreToolUse."""
+        raw = {
+            "agent_action_name": "pre_run_command",
+            "trajectory_id": "traj-123",
+            "execution_id": "exec-456",
+            "timestamp": "2026-01-29T10:00:00Z",
+            "tool_info": {
+                "command_line": "git status",
+                "cwd": "/project",
+            },
+        }
+        result = self.adapter.parse_input(raw)
+
+        assert result["hook_event_name"] == "PreToolUse"
+        assert result["tool_name"] == "Bash"
+        assert result["tool_input"]["command"] == "git status"
+        assert result["cwd"] == "/project"
+        assert result["trajectory_id"] == "traj-123"
+
+    def test_parse_post_run_command(self):
+        """Test post_run_command is mapped to PostToolUseFailure."""
+        raw = {
+            "agent_action_name": "post_run_command",
+            "trajectory_id": "traj-123",
+            "execution_id": "exec-456",
+            "timestamp": "2026-01-29T10:00:00Z",
+            "tool_info": {
+                "command_line": "npm test",
+                "cwd": "/project",
+                "output": "Error: test failed",
+                "exit_code": 1,
+            },
+        }
+        result = self.adapter.parse_input(raw)
+
+        assert result["hook_event_name"] == "PostToolUseFailure"
+        assert result["tool_name"] == "Bash"
+        assert result["tool_input"]["command"] == "npm test"
+        assert result["tool_response"] == "Error: test failed"
+        assert result["exit_code"] == 1
+
+    def test_parse_post_cascade_response(self):
+        """Test post_cascade_response is mapped to Stop."""
+        raw = {
+            "agent_action_name": "post_cascade_response",
+            "trajectory_id": "traj-123",
+            "execution_id": "exec-456",
+            "timestamp": "2026-01-29T10:00:00Z",
+            "tool_info": {
+                "response": "I've completed the task. Would you like me to proceed?",
+            },
+        }
+        result = self.adapter.parse_input(raw)
+
+        assert result["hook_event_name"] == "Stop"
+        assert result["response"] == "I've completed the task. Would you like me to proceed?"
+
+    def test_parse_unknown_event_passthrough(self):
+        """Test unknown events pass through unchanged."""
+        raw = {
+            "agent_action_name": "unknown_event",
+            "trajectory_id": "traj-123",
+        }
+        result = self.adapter.parse_input(raw)
+
+        assert result["hook_event_name"] == "unknown_event"
+
+
+class TestWindsurfAdapterFormatOutput:
+    """Tests for Windsurf output formatting."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from drinkingbird.adapters.windsurf import WindsurfAdapter
+        self.adapter = WindsurfAdapter()
+
+    def test_format_output_block_sets_exit_code_2(self):
+        """Test block decision sets exit code 2."""
+        result = {"decision": "block", "reason": "Dangerous command"}
+        output = self.adapter.format_output(result, "PreToolUse")
+
+        assert output["_windsurf_exit_code"] == 2
+        assert output["decision"] == "block"
+
+    def test_format_output_allow_sets_exit_code_0(self):
+        """Test allow decision sets exit code 0."""
+        result = {"decision": "allow"}
+        output = self.adapter.format_output(result, "PreToolUse")
+
+        assert output["_windsurf_exit_code"] == 0
+
+    def test_format_output_no_decision_sets_exit_code_0(self):
+        """Test no decision defaults to exit code 0."""
+        result = {}
+        output = self.adapter.format_output(result, "Stop")
+
+        assert output["_windsurf_exit_code"] == 0
+
+    def test_format_output_preserves_other_fields(self):
+        """Test other fields are preserved."""
+        result = {"decision": "block", "reason": "test", "custom": "value"}
+        output = self.adapter.format_output(result, "PreToolUse")
+
+        assert output["reason"] == "test"
+        assert output["custom"] == "value"
+
+
+class TestWindsurfAdapterInstallConfig:
+    """Tests for Windsurf install configuration."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from drinkingbird.adapters.windsurf import WindsurfAdapter
+        self.adapter = WindsurfAdapter()
+        self.config = self.adapter.get_install_config()
+
+    def test_has_hooks_key(self):
+        """Test config has hooks key."""
+        assert "hooks" in self.config
+
+    def test_has_expected_hook_events(self):
+        """Test config has Windsurf hook events."""
+        hooks = self.config["hooks"]
+
+        assert "pre_run_command" in hooks
+        assert "post_run_command" in hooks
+        assert "post_cascade_response" in hooks
+
+    def test_hooks_are_arrays(self):
+        """Test each hook is an array (Windsurf format)."""
+        for event_name, hook_list in self.config["hooks"].items():
+            assert isinstance(hook_list, list), f"{event_name} should be a list"
+            assert len(hook_list) > 0, f"{event_name} should have at least one hook"
+
+    def test_hook_commands_have_required_fields(self):
+        """Test each hook has command and show_output."""
+        for event_name, hook_list in self.config["hooks"].items():
+            for hook in hook_list:
+                assert "command" in hook, f"{event_name} hook missing command"
+                assert "bdb run --adapter windsurf" in hook["command"]
+                assert "show_output" in hook, f"{event_name} hook missing show_output"
+
+
+class TestWindsurfAdapterInstall:
+    """Tests for Windsurf install method."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from drinkingbird.adapters.windsurf import WindsurfAdapter
+        self.adapter = WindsurfAdapter()
+
+    def test_install_creates_new_config(self, tmp_path):
+        """Test install creates config when none exists."""
+        config_path = tmp_path / ".codeium" / "windsurf" / "hooks.json"
+        self.adapter.get_config_path = lambda: config_path
+        bdb_path = Path("/usr/local/bin/bdb")
+
+        result = self.adapter.install(bdb_path)
+
+        assert result is True
+        assert config_path.exists()
+
+        config = json.loads(config_path.read_text())
+        assert "hooks" in config
+        assert "pre_run_command" in config["hooks"]
+
+    def test_install_updates_command_path(self, tmp_path):
+        """Test install updates command with actual bdb path."""
+        config_path = tmp_path / "hooks.json"
+        self.adapter.get_config_path = lambda: config_path
+        bdb_path = Path("/home/user/.local/bin/bdb")
+
+        self.adapter.install(bdb_path)
+
+        config = json.loads(config_path.read_text())
+        hook = config["hooks"]["pre_run_command"][0]
+
+        assert hook["command"] == "/home/user/.local/bin/bdb run --adapter windsurf"
+
+    def test_install_preserves_existing_hooks(self, tmp_path):
+        """Test install preserves non-bdb hooks."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "pre_run_command": [
+                    {"command": "my-custom-hook", "show_output": True}
+                ],
+                "pre_read_code": [
+                    {"command": "audit-logger", "show_output": False}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+        bdb_path = Path("/usr/local/bin/bdb")
+
+        self.adapter.install(bdb_path)
+
+        config = json.loads(config_path.read_text())
+
+        # Should have both custom and bdb hooks for pre_run_command
+        assert len(config["hooks"]["pre_run_command"]) == 2
+        assert config["hooks"]["pre_run_command"][0]["command"] == "my-custom-hook"
+        assert "bdb" in config["hooks"]["pre_run_command"][1]["command"]
+
+        # Should preserve unrelated hooks
+        assert "pre_read_code" in config["hooks"]
+
+    def test_install_removes_existing_bdb_hooks(self, tmp_path):
+        """Test install removes old bdb hooks before adding new ones."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "pre_run_command": [
+                    {"command": "/old/path/bdb run --adapter windsurf", "show_output": True}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+        bdb_path = Path("/new/path/bdb")
+
+        self.adapter.install(bdb_path)
+
+        config = json.loads(config_path.read_text())
+
+        # Should only have one hook with the new path
+        assert len(config["hooks"]["pre_run_command"]) == 1
+        assert "/new/path/bdb" in config["hooks"]["pre_run_command"][0]["command"]
+
+
+class TestWindsurfAdapterUninstall:
+    """Tests for Windsurf uninstall method."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from drinkingbird.adapters.windsurf import WindsurfAdapter
+        self.adapter = WindsurfAdapter()
+
+    def test_uninstall_removes_bdb_hooks(self, tmp_path):
+        """Test uninstall removes bdb hooks."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "pre_run_command": [
+                    {"command": "bdb run --adapter windsurf", "show_output": True}
+                ],
+                "post_cascade_response": [
+                    {"command": "/usr/bin/bdb run --adapter windsurf", "show_output": True}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is True
+        config = json.loads(config_path.read_text())
+        assert "hooks" not in config or not config.get("hooks")
+
+    def test_uninstall_preserves_non_bdb_hooks(self, tmp_path):
+        """Test uninstall preserves hooks that aren't from bdb."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "pre_run_command": [
+                    {"command": "bdb run --adapter windsurf", "show_output": True},
+                    {"command": "my-custom-hook", "show_output": True},
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is True
+        config = json.loads(config_path.read_text())
+        assert len(config["hooks"]["pre_run_command"]) == 1
+        assert config["hooks"]["pre_run_command"][0]["command"] == "my-custom-hook"
+
+    def test_uninstall_returns_false_if_no_bdb_hooks(self, tmp_path):
+        """Test uninstall returns False if no bdb hooks found."""
+        config_path = tmp_path / "hooks.json"
+        config_path.write_text(json.dumps({
+            "hooks": {
+                "pre_run_command": [
+                    {"command": "other-hook", "show_output": True}
+                ],
+            }
+        }))
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is False
+
+    def test_uninstall_returns_false_if_no_config_file(self, tmp_path):
+        """Test uninstall returns False if config file doesn't exist."""
+        config_path = tmp_path / "hooks.json"
+        self.adapter.get_config_path = lambda: config_path
+
+        result = self.adapter.uninstall()
+
+        assert result is False
+
+
 def test_adapter_exports():
     """Test all adapters are exported from package."""
     from drinkingbird import adapters
 
     assert hasattr(adapters, "KiloCodeAdapter")
     assert hasattr(adapters, "ClineAdapter")
+    assert hasattr(adapters, "WindsurfAdapter")
+    assert hasattr(adapters, "ADAPTER_MAP")
+    assert hasattr(adapters, "SUPPORTED_AGENTS")
 
 
 class TestCLI:
@@ -628,3 +975,18 @@ class TestCLI:
         result = self.runner.invoke(main, ["install", "cline", "--dry-run"])
         assert result.exit_code == 0
         assert "cline" in result.output
+
+    def test_install_windsurf_dry_run(self):
+        """Test install command accepts windsurf."""
+        from drinkingbird.cli import main
+        result = self.runner.invoke(main, ["install", "windsurf", "--dry-run"])
+        assert result.exit_code == 0
+        assert "windsurf" in result.output
+
+    def test_windsurf_in_agents_list(self):
+        """Test windsurf appears in agents list."""
+        from drinkingbird.cli import main
+        result = self.runner.invoke(main, ["agents"])
+        assert result.exit_code == 0
+        assert "windsurf" in result.output
+        assert "Cascade hooks" in result.output
