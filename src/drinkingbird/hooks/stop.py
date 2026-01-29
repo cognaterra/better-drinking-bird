@@ -108,7 +108,7 @@ class StopHook(Hook):
             block_reason = self._check_permission_seeking(last_assistant)
             if block_reason:
                 debug(f"BLOCKED by pattern: {block_reason}")
-                # Still extract mentions for the block message
+                # Extract and validate mentions for the block message
                 all_user_messages = self._extract_all_user_messages(messages)
                 all_mentions: list[str] = []
                 seen: set[str] = set()
@@ -117,12 +117,14 @@ class StopHook(Hook):
                         if mention not in seen:
                             all_mentions.append(mention)
                             seen.add(mention)
+                # Filter to only valid file references
+                valid_mentions = self._filter_valid_mentions(all_mentions, cwd)
                 message = (
                     "Stick to the plan. Do it right. The reward at the end is worth it.\n\n"
                     f"Blocked: {block_reason}"
                 )
-                if all_mentions:
-                    refs = ", ".join(f"@{m}" for m in all_mentions)
+                if valid_mentions:
+                    refs = ", ".join(f"@{m}" for m in valid_mentions)
                     message = f"{message}\n\nReferenced documents: {refs}"
                 return HookResult.block(message)
 
@@ -177,9 +179,9 @@ class StopHook(Hook):
             message = response.content.get(
                 "message", response.content.get("reason", "Get back to work.")
             )
-            # Include @ref paths in correction message
-            if all_mentions:
-                refs = ", ".join(f"@{m}" for m in all_mentions)
+            # Include @ref paths in correction message (only valid files)
+            if files:
+                refs = ", ".join(f"@{m}" for m in files.keys())
                 message = f"{message}\n\nReferenced documents: {refs}"
             return HookResult.block(message)
 
@@ -325,7 +327,10 @@ class StopHook(Hook):
     def _read_mentioned_files(
         self, mentions: list[str], cwd: str
     ) -> dict[str, str]:
-        """Read contents of mentioned files, resolving relative paths."""
+        """Read contents of mentioned files, resolving relative paths.
+
+        Only includes files that actually exist - skips invalid mentions.
+        """
         files = {}
         for mention in mentions:
             if not os.path.isabs(mention):
@@ -333,12 +338,31 @@ class StopHook(Hook):
             else:
                 path = mention
 
+            # Only include files that exist
+            if not os.path.isfile(path):
+                continue
+
             try:
                 with open(path, "r") as f:
                     files[mention] = f.read()
-            except (FileNotFoundError, PermissionError, IsADirectoryError):
-                files[mention] = f"[Could not read file: {mention}]"
+            except (PermissionError, IsADirectoryError):
+                # Skip files we can't read
+                continue
         return files
+
+    def _filter_valid_mentions(
+        self, mentions: list[str], cwd: str
+    ) -> list[str]:
+        """Filter mentions to only those that exist as files."""
+        valid = []
+        for mention in mentions:
+            if not os.path.isabs(mention):
+                path = os.path.join(cwd, mention)
+            else:
+                path = mention
+            if os.path.isfile(path):
+                valid.append(mention)
+        return valid
 
     def _build_user_prompt(
         self,

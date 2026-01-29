@@ -35,8 +35,8 @@ class PreCompactHook(Hook):
         context_files = self._find_default_files(cwd)
         debug(f"Found {len(context_files)} context files")
 
-        # Extract @refs from user messages in transcript
-        user_refs = self._extract_user_refs(transcript_path)
+        # Extract @refs from user messages in transcript (only valid files)
+        user_refs = self._extract_user_refs(transcript_path, cwd)
         debug(f"Found {len(user_refs)} user @refs")
 
         if not context_files and not user_refs:
@@ -61,8 +61,11 @@ class PreCompactHook(Hook):
 
         return found
 
-    def _extract_user_refs(self, transcript_path: str) -> list[str]:
-        """Extract @references from all user messages in transcript."""
+    def _extract_user_refs(self, transcript_path: str, cwd: str) -> list[str]:
+        """Extract @references from all user messages in transcript.
+
+        Only includes references that exist as actual files.
+        """
         if not transcript_path:
             return []
 
@@ -85,12 +88,22 @@ class PreCompactHook(Hook):
                     if content:
                         for ref in self._extract_mentions(content):
                             if ref not in seen:
-                                refs.append(ref)
+                                # Validate file exists
+                                if self._is_valid_file_ref(ref, cwd):
+                                    refs.append(ref)
                                 seen.add(ref)
         except (FileNotFoundError, PermissionError):
             pass
 
         return refs
+
+    def _is_valid_file_ref(self, ref: str, cwd: str) -> bool:
+        """Check if a reference points to an existing file."""
+        if not os.path.isabs(ref):
+            path = os.path.join(cwd, ref)
+        else:
+            path = ref
+        return os.path.isfile(path)
 
     def _get_user_content(self, msg: dict) -> str | None:
         """Extract text content from a user message."""
