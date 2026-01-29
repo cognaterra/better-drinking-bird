@@ -79,21 +79,20 @@ def init(force: bool) -> None:
 
 @main.command()
 @click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]))
-@click.option("--global", "use_global", is_flag=True, help="Install globally (default)")
-@click.option("--local", "use_local", is_flag=True, help="Install locally (current workspace)")
+@click.option("--global", "use_global", is_flag=True, help="Install globally instead of locally")
 @click.option(
     "--dry-run", "-n",
     is_flag=True,
     help="Show what would be done without making changes",
 )
-def install(agent: str, use_global: bool, use_local: bool, dry_run: bool) -> None:
+def install(agent: str, use_global: bool, dry_run: bool) -> None:
     """Install hooks for an AI coding agent.
 
     Configures the specified agent to use Better Drinking Bird
     as its hook supervisor.
 
-    By default, installs globally. Use --local to install in the
-    current workspace only.
+    By default, installs locally if in a git repository, otherwise globally.
+    Use --global to force global installation.
     """
     from drinkingbird.adapters import (
         ClaudeCodeAdapter,
@@ -104,10 +103,6 @@ def install(agent: str, use_global: bool, use_local: bool, dry_run: bool) -> Non
         StdinAdapter,
     )
     from drinkingbird.manifest import Manifest
-
-    if use_global and use_local:
-        click.echo("Cannot specify both --global and --local", err=True)
-        sys.exit(1)
 
     adapters = {
         "claude-code": ClaudeCodeAdapter,
@@ -121,18 +116,13 @@ def install(agent: str, use_global: bool, use_local: bool, dry_run: bool) -> Non
     adapter_class = adapters[agent]
     adapter = adapter_class()
 
-    # Determine scope
-    scope = "local" if use_local else "global"
-    workspace = None
-
-    if scope == "local":
-        if not adapter.supports_local:
-            click.echo(f"{agent} does not support local installation", err=True)
-            sys.exit(1)
-        workspace = get_workspace_root()
-        if not workspace:
-            click.echo("Not in a git repository. Use --global instead.", err=True)
-            sys.exit(1)
+    # Determine scope: local if in git repo (and supported), otherwise global
+    workspace = get_workspace_root()
+    if use_global or not workspace or not adapter.supports_local:
+        scope = "global"
+        workspace = None
+    else:
+        scope = "local"
 
     # Find bdb executable
     bdb_path = shutil.which("bdb")
@@ -170,8 +160,7 @@ def install(agent: str, use_global: bool, use_local: bool, dry_run: bool) -> Non
 
 @main.command()
 @click.argument("agent", type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin"]), required=False)
-@click.option("--global", "use_global", is_flag=True, help="Uninstall global hooks only")
-@click.option("--local", "use_local", is_flag=True, help="Uninstall local hooks only")
+@click.option("--global", "use_global", is_flag=True, help="Uninstall global hooks instead of local")
 @click.option("--all", "uninstall_all", is_flag=True, help="Uninstall all bdb hooks everywhere")
 @click.option(
     "--dry-run", "-n",
@@ -181,7 +170,6 @@ def install(agent: str, use_global: bool, use_local: bool, dry_run: bool) -> Non
 def uninstall(
     agent: str | None,
     use_global: bool,
-    use_local: bool,
     uninstall_all: bool,
     dry_run: bool,
 ) -> None:
@@ -190,7 +178,8 @@ def uninstall(
     Removes Better Drinking Bird hooks from the specified agent's
     configuration while preserving other hooks and settings.
 
-    Use --all to uninstall from all locations tracked in the manifest.
+    By default, uninstalls locally if in a git repository.
+    Use --global to uninstall global hooks, or --all for everything.
     """
     from drinkingbird.adapters import (
         ClaudeCodeAdapter,
@@ -201,10 +190,6 @@ def uninstall(
         StdinAdapter,
     )
     from drinkingbird.manifest import Manifest
-
-    if use_global and use_local:
-        click.echo("Cannot specify both --global and --local", err=True)
-        sys.exit(1)
 
     if uninstall_all and agent:
         click.echo("Cannot specify both --all and an agent", err=True)
@@ -266,38 +251,16 @@ def uninstall(
     adapter_class = adapters[agent]
     adapter = adapter_class()
 
-    # Determine scope
-    scope = None
-    if use_local:
-        scope = "local"
-    elif use_global:
+    # Determine scope: local if in git repo (unless --global), otherwise global
+    workspace = get_workspace_root()
+    if use_global:
         scope = "global"
-
-    workspace = None
-    if scope == "local" or (scope is None and adapter.supports_local):
-        workspace = get_workspace_root()
-
-    # If no scope specified, try to find from manifest or detect
-    if scope is None:
-        # Check manifest for this agent
-        installations = manifest.get(agent=agent)
-        if installations:
-            # Prefer local if both exist
-            local_inst = [i for i in installations if i.scope == "local"]
-            global_inst = [i for i in installations if i.scope == "global"]
-
-            if local_inst and workspace:
-                scope = "local"
-            elif global_inst:
-                scope = "global"
-            elif local_inst:
-                # Local exists but we're not in that workspace
-                click.echo(f"Found local installation at {local_inst[0].path}")
-                click.echo("Use --global or cd to the workspace.")
-                sys.exit(1)
-        else:
-            # Default to global
-            scope = "global"
+        workspace = None
+    elif workspace and adapter.supports_local:
+        scope = "local"
+    else:
+        scope = "global"
+        workspace = None
 
     config_path = adapter.get_effective_config_path(scope, workspace)
 
@@ -754,30 +717,19 @@ def config_template() -> None:
 
 
 @main.command()
-@click.option("--global", "use_global", is_flag=True, help="Use global sentinel (~/.bdb/)")
-@click.option("--local", "use_local", is_flag=True, help="Use local sentinel (workspace root)")
+@click.option("--global", "use_global", is_flag=True, help="Use global sentinel (~/.bdb/) instead of local")
 @click.option("--reason", "-r", type=str, help="Reason for pausing")
-def pause(use_global: bool, use_local: bool, reason: str | None) -> None:
+def pause(use_global: bool, reason: str | None) -> None:
     """Pause bdb hooks temporarily.
 
     Creates a sentinel file that causes bdb to bypass all hook checks.
     By default, creates local sentinel in git repos, global otherwise.
+    Use --global to force global pause.
     """
-    if use_global and use_local:
-        click.echo("Cannot specify both --global and --local", err=True)
-        sys.exit(1)
-
     # Determine which sentinel to use
     if use_global:
         sentinel = GLOBAL_SENTINEL
         location = "global"
-    elif use_local:
-        local = get_local_sentinel()
-        if not local:
-            click.echo("Not in a git repository. Use --global instead.", err=True)
-            sys.exit(1)
-        sentinel = local
-        location = "local"
     else:
         # Default: local if in git repo, global otherwise
         local = get_local_sentinel()
@@ -795,26 +747,16 @@ def pause(use_global: bool, use_local: bool, reason: str | None) -> None:
 
 
 @main.command()
-@click.option("--global", "use_global", is_flag=True, help="Remove global sentinel")
-@click.option("--local", "use_local", is_flag=True, help="Remove local sentinel")
-def resume(use_global: bool, use_local: bool) -> None:
+@click.option("--global", "use_global", is_flag=True, help="Remove global sentinel instead of active one")
+def resume(use_global: bool) -> None:
     """Resume bdb hooks.
 
     Removes the pause sentinel file. By default, removes whichever
     sentinel is currently active (local takes precedence).
+    Use --global to specifically remove the global sentinel.
     """
-    if use_global and use_local:
-        click.echo("Cannot specify both --global and --local", err=True)
-        sys.exit(1)
-
     if use_global:
         sentinel = GLOBAL_SENTINEL
-    elif use_local:
-        local = get_local_sentinel()
-        if not local:
-            click.echo("Not in a git repository.", err=True)
-            sys.exit(1)
-        sentinel = local
     else:
         # Find active sentinel
         paused, path = is_paused()
