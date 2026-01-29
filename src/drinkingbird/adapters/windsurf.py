@@ -92,12 +92,18 @@ class WindsurfAdapter(Adapter):
         - Exit 0: Allow action to proceed
         - Exit 2: Block action
 
-        The actual exit code is handled by the CLI. Here we just
-        pass through the result with a flag for the CLI to check.
+        Since show_output is enabled, stdout is shown to the user.
+        We output the human-readable message instead of JSON.
         """
-        # Add windsurf-specific flag for CLI to handle exit codes
-        output = result.copy()
-        output["_windsurf_exit_code"] = 2 if result.get("decision") == "block" else 0
+        output: dict[str, Any] = {
+            "_windsurf_exit_code": 2 if result.get("decision") == "block" else 0,
+        }
+
+        # For blocking, include the message to show the user
+        if result.get("decision") == "block":
+            message = result.get("message") or result.get("reason") or "Blocked by supervisor"
+            output["_windsurf_message"] = message
+
         return output
 
     def get_install_config(self) -> dict[str, Any]:

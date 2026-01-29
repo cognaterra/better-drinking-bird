@@ -721,7 +721,20 @@ class TestWindsurfAdapterFormatOutput:
         output = self.adapter.format_output(result, "PreToolUse")
 
         assert output["_windsurf_exit_code"] == 2
-        assert output["decision"] == "block"
+
+    def test_format_output_block_includes_message(self):
+        """Test block decision includes human-readable message."""
+        result = {"decision": "block", "message": "Get back to work!"}
+        output = self.adapter.format_output(result, "Stop")
+
+        assert output["_windsurf_message"] == "Get back to work!"
+
+    def test_format_output_block_falls_back_to_reason(self):
+        """Test block uses reason if no message."""
+        result = {"decision": "block", "reason": "Dangerous command"}
+        output = self.adapter.format_output(result, "PreToolUse")
+
+        assert output["_windsurf_message"] == "Dangerous command"
 
     def test_format_output_allow_sets_exit_code_0(self):
         """Test allow decision sets exit code 0."""
@@ -729,6 +742,7 @@ class TestWindsurfAdapterFormatOutput:
         output = self.adapter.format_output(result, "PreToolUse")
 
         assert output["_windsurf_exit_code"] == 0
+        assert "_windsurf_message" not in output
 
     def test_format_output_no_decision_sets_exit_code_0(self):
         """Test no decision defaults to exit code 0."""
@@ -736,14 +750,7 @@ class TestWindsurfAdapterFormatOutput:
         output = self.adapter.format_output(result, "Stop")
 
         assert output["_windsurf_exit_code"] == 0
-
-    def test_format_output_preserves_other_fields(self):
-        """Test other fields are preserved."""
-        result = {"decision": "block", "reason": "test", "custom": "value"}
-        output = self.adapter.format_output(result, "PreToolUse")
-
-        assert output["reason"] == "test"
-        assert output["custom"] == "value"
+        assert "_windsurf_message" not in output
 
 
 class TestWindsurfAdapterInstallConfig:

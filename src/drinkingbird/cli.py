@@ -523,8 +523,12 @@ def run(adapter: str, debug: bool) -> None:
 
     # Handle exit codes for adapters that use them (e.g., Windsurf)
     exit_code = output.pop("_windsurf_exit_code", None) if output else None
+    windsurf_message = output.pop("_windsurf_message", None) if output else None
 
-    if output:
+    # For Windsurf, print human-readable message instead of JSON
+    if windsurf_message:
+        print(windsurf_message)
+    elif output:
         print(json.dumps(output))
 
     # Exit with appropriate code for adapters that use exit codes for blocking
