@@ -11,6 +11,25 @@ from typing import Any
 from drinkingbird.hooks.base import DebugFn, Decision, Hook, HookResult
 
 
+# Patterns that indicate permission-seeking - block immediately without LLM
+PERMISSION_SEEKING_PATTERNS = [
+    r"ready\s+for\s+(your\s+)?feedback",
+    r"should\s+I\s+proceed",
+    r"would\s+you\s+like\s+(me\s+to|to)",
+    r"if\s+you\s+(want|would\s+like)",
+    r"let\s+me\s+know\s+(if|when|what)",
+    r"awaiting\s+(your|further)",
+    r"waiting\s+for\s+(your|further)",
+    r"please\s+(confirm|let\s+me\s+know|advise)",
+    r"do\s+you\s+want\s+me\s+to",
+    r"shall\s+I\s+(proceed|continue|go\s+ahead)",
+    r"I\s+can\s+(also|help|assist).*if\s+you",
+    r"what\s+would\s+you\s+like\s+me\s+to",
+    r"I('m|\s+am)\s+ready\s+(to|for)",
+    r"next\s+steps.*\?\s*$",
+]
+
+
 SYSTEM_PROMPT = """You are a supervisor for an AI coding agent running in an automated loop.
 
 The agent has stopped. You must decide what to do:
@@ -83,6 +102,29 @@ class StopHook(Hook):
 
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")
+
+        # Check for permission-seeking patterns BEFORE calling LLM
+        if last_assistant:
+            block_reason = self._check_permission_seeking(last_assistant)
+            if block_reason:
+                debug(f"BLOCKED by pattern: {block_reason}")
+                # Still extract mentions for the block message
+                all_user_messages = self._extract_all_user_messages(messages)
+                all_mentions: list[str] = []
+                seen: set[str] = set()
+                for user_msg in all_user_messages:
+                    for mention in self._extract_mentions(user_msg):
+                        if mention not in seen:
+                            all_mentions.append(mention)
+                            seen.add(mention)
+                message = (
+                    "Stick to the plan. Do it right. The reward at the end is worth it.\n\n"
+                    f"Blocked: {block_reason}"
+                )
+                if all_mentions:
+                    refs = ", ".join(f"@{m}" for m in all_mentions)
+                    message = f"{message}\n\nReferenced documents: {refs}"
+                return HookResult.block(message)
 
         # Extract @mentions from ALL user messages (deduplicated)
         all_user_messages = self._extract_all_user_messages(messages)
@@ -259,6 +301,18 @@ class StopHook(Hook):
                             return content.get("text", "")
                         return str(content)
                 return message if isinstance(message, str) else str(message)
+        return None
+
+    def _check_permission_seeking(self, text: str) -> str | None:
+        """Check if text contains permission-seeking patterns.
+
+        Returns the matched pattern description if found, None otherwise.
+        """
+        if not text:
+            return None
+        for pattern in PERMISSION_SEEKING_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return f"Permission-seeking detected: '{pattern}'"
         return None
 
     def _extract_mentions(self, text: str) -> list[str]:

@@ -390,3 +390,53 @@ class TestStopHook:
         # Verify the flag was NOT checked (no "stop_hook_active=true" in debug)
         debug_text = " ".join(debug_messages)
         assert "stop_hook_active" not in debug_text.lower()
+
+    def test_check_permission_seeking_ready_for_feedback(self):
+        """Test that 'ready for feedback' is detected."""
+        result = self.hook._check_permission_seeking("I'm ready for feedback")
+        assert result is not None
+        assert "Permission-seeking" in result
+
+    def test_check_permission_seeking_should_i_proceed(self):
+        """Test that 'should I proceed' is detected."""
+        result = self.hook._check_permission_seeking("Should I proceed with the next step?")
+        assert result is not None
+
+    def test_check_permission_seeking_would_you_like(self):
+        """Test that 'would you like me to' is detected."""
+        result = self.hook._check_permission_seeking("Would you like me to continue?")
+        assert result is not None
+
+    def test_check_permission_seeking_if_you_want(self):
+        """Test that 'if you want, I can' is detected."""
+        result = self.hook._check_permission_seeking(
+            "If you want, I can draft a plan for you"
+        )
+        assert result is not None
+
+    def test_check_permission_seeking_let_me_know(self):
+        """Test that 'let me know if' is detected."""
+        result = self.hook._check_permission_seeking("Let me know if you need anything else")
+        assert result is not None
+
+    def test_check_permission_seeking_awaiting(self):
+        """Test that 'awaiting your' is detected."""
+        result = self.hook._check_permission_seeking("Awaiting your response")
+        assert result is not None
+
+    def test_check_permission_seeking_normal_text(self):
+        """Test that normal text is not flagged."""
+        result = self.hook._check_permission_seeking(
+            "I have completed the implementation and all tests pass."
+        )
+        assert result is None
+
+    def test_check_permission_seeking_none(self):
+        """Test that None returns None."""
+        result = self.hook._check_permission_seeking(None)
+        assert result is None
+
+    def test_check_permission_seeking_empty(self):
+        """Test that empty string returns None."""
+        result = self.hook._check_permission_seeking("")
+        assert result is None
