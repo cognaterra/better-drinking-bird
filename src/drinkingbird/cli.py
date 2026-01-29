@@ -323,16 +323,49 @@ def uninstall(
 
 
 @main.command()
-def status() -> None:
+@click.option(
+    "--global",
+    "use_global",
+    is_flag=True,
+    help="Show all installations (highlights active config in cyan)",
+)
+def status(use_global: bool) -> None:
     """Show BDB installation status.
 
-    Displays all locations where BDB hooks are installed,
-    based on the installation manifest.
+    By default, shows only the config for the current location:
+    - Local config if in a git repository with BDB installed
+    - Global config otherwise
+
+    Use --global to see all installations.
     """
-    from drinkingbird.manifest import Manifest
+    from drinkingbird.manifest import Installation, Manifest
 
     manifest = Manifest.load()
-    installations = manifest.get()
+
+    # Determine active scope for current directory
+    workspace = get_workspace_root()
+    if workspace:
+        active_scope = "local"
+        active_path = str(workspace)
+    else:
+        active_scope = "global"
+        active_path = None
+
+    def is_active(inst: Installation) -> bool:
+        """Check if installation is active for current directory."""
+        if inst.scope != active_scope:
+            return False
+        if active_scope == "local" and active_path:
+            return active_path in inst.path
+        return active_scope == "global"
+
+    if use_global:
+        installations = manifest.get()
+    else:
+        installations = manifest.get(scope=active_scope)
+        # Filter local installations to match current workspace
+        if active_scope == "local" and active_path:
+            installations = [i for i in installations if active_path in i.path]
 
     if not installations:
         click.echo("No BDB installations found.")
@@ -359,7 +392,13 @@ def status() -> None:
             date_str = inst.installed_at[:10] if inst.installed_at else "unknown"
             exists = Path(inst.path).exists()
             status_icon = "✓" if exists else "✗"
-            click.echo(f"  {status_icon} {inst.scope}: {inst.path}")
+            line = f"  {status_icon} {inst.scope}: {inst.path}"
+
+            # Highlight active config in cyan when showing all
+            if use_global and is_active(inst):
+                click.secho(line, fg="cyan")
+            else:
+                click.echo(line)
             click.echo(f"      installed: {date_str}")
 
     click.echo()
