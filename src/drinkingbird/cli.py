@@ -384,12 +384,31 @@ def status(use_global: bool) -> None:
         if sentinel_path:
             click.echo(f"   {sentinel_path}")
 
-    # Group by agent
+    # Clean up missing installations and group by agent
     by_agent: dict[str, list] = {}
+    removed_count = 0
     for inst in installations:
+        if not Path(inst.path).exists():
+            # Config file missing - remove from manifest
+            manifest.remove(path=inst.path)
+            removed_count += 1
+            continue
         if inst.agent not in by_agent:
             by_agent[inst.agent] = []
         by_agent[inst.agent].append(inst)
+
+    if removed_count > 0:
+        manifest.save()
+        click.secho(
+            f"Cleaned up {removed_count} stale installation(s)", fg="yellow"
+        )
+
+    if not by_agent:
+        click.echo("No BDB installations found.")
+        click.echo()
+        click.echo("To install hooks, run:")
+        click.echo("  bdb install claude-code")
+        return
 
     for agent in sorted(by_agent.keys()):
         click.echo()
@@ -397,9 +416,7 @@ def status(use_global: bool) -> None:
         for inst in by_agent[agent]:
             # Parse date from ISO format
             date_str = inst.installed_at[:10] if inst.installed_at else "unknown"
-            exists = Path(inst.path).exists()
-            status_icon = "✓" if exists else "✗"
-            line = f"  {status_icon} {inst.scope}: {inst.path}"
+            line = f"  ✓ {inst.scope}: {inst.path}"
 
             # Highlight active config in cyan when showing all
             if use_global and is_active(inst):
@@ -408,8 +425,9 @@ def status(use_global: bool) -> None:
                 click.echo(line)
             click.echo(f"      installed: {date_str}")
 
+    total = sum(len(insts) for insts in by_agent.values())
     click.echo()
-    click.echo(f"Total: {len(installations)} installation(s)")
+    click.echo(f"Total: {total} installation(s)")
 
 
 @main.command()
