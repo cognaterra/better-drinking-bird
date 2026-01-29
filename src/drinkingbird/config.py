@@ -19,7 +19,7 @@ LEGACY_CONFIG_PATH = Path.home() / ".bdbrc"
 DEFAULT_CONFIG = {
     "llm": {
         "provider": "openai",
-        "model": "gpt-5-nano",
+        "model": "gpt-4o-mini",
         "api_key": None,
         "api_key_env": None,
         "base_url": None,

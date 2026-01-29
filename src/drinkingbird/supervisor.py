@@ -126,10 +126,18 @@ class Supervisor:
         # Initialize tracer
         self.tracer = Tracer(self.config.tracing)
 
-    def debug(self, msg: str) -> None:
-        """Log debug message."""
+    def debug(self, msg: str, cwd: str | None = None) -> None:
+        """Log debug message.
+
+        Args:
+            msg: The message to log
+            cwd: Optional working directory to include in log
+        """
         timestamp = datetime.now().isoformat()
-        log_line = f"[{timestamp}] {msg}\n"
+        if cwd:
+            log_line = f"[{timestamp}] [{cwd}] {msg}\n"
+        else:
+            log_line = f"[{timestamp}] {msg}\n"
 
         try:
             with open(self.log_file, "a") as f:
@@ -172,19 +180,20 @@ class Supervisor:
             HookResult indicating what to do
         """
         event_name = hook_input.get("hook_event_name", "")
-        self.debug(f"Handling event: {event_name}")
+        cwd = hook_input.get("cwd") or os.getcwd()
+        self.debug(f"Handling event: {event_name}", cwd=cwd)
 
         # Check if paused FIRST
         paused, sentinel_path = is_paused()
         if paused:
-            self.debug(f"BDB paused via {sentinel_path}")
+            self.debug(f"BDB paused via {sentinel_path}", cwd=cwd)
             return HookResult.allow("BDB is paused")
 
         # Get appropriate hook (pass tracer for LLM tracing)
         hook = get_hook(event_name, self.config, self.llm_provider, self.tracer)
 
         if hook is None:
-            self.debug(f"No handler for event: {event_name}")
+            self.debug(f"No handler for event: {event_name}", cwd=cwd)
             return HookResult.allow(f"No handler for {event_name}")
 
         # Execute hook within trace context
@@ -197,7 +206,7 @@ class Supervisor:
         with self.tracer.trace(f"bdb_{event_name.lower()}", metadata=trace_metadata):
             try:
                 result = hook.handle(hook_input, self.debug)
-                self.debug(f"Hook result: {result.decision.value}")
+                self.debug(f"Hook result: {result.decision.value}", cwd=cwd)
 
                 # Log decision as score
                 self.tracer.score(

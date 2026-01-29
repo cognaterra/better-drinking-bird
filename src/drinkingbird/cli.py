@@ -254,27 +254,160 @@ def uninstall(
 
 
 @main.command()
+def agents() -> None:
+    """List supported AI coding agents.
+
+    Shows all agents that BDB can integrate with, along with their
+    integration method and local installation support.
+    """
+    from drinkingbird.adapters import (
+        ClaudeCodeAdapter,
+        ClineAdapter,
+        CopilotAdapter,
+        CursorAdapter,
+        KiloCodeAdapter,
+        StdinAdapter,
+    )
+
+    agents_info = [
+        ("claude-code", ClaudeCodeAdapter(), "Claude Code editor", "Native hooks"),
+        ("cursor", CursorAdapter(), "Cursor editor", "Script-based hooks"),
+        ("copilot", CopilotAdapter(), "GitHub Copilot", "Shell command hooks"),
+        ("cline", ClineAdapter(), "Cline VS Code extension", "Script hooks"),
+        ("kilo-code", KiloCodeAdapter(), "Kilo Code extension", "Native hooks"),
+        ("stdin", StdinAdapter(), "Generic stdin/stdout", "Piped JSON"),
+    ]
+
+    click.echo("Supported Agents")
+    click.echo("=" * 50)
+    click.echo()
+
+    for name, adapter, description, method in agents_info:
+        local_support = "✓" if adapter.supports_local else "-"
+        click.echo(f"  {name:<12} {description}")
+        click.echo(f"               Method: {method}")
+        click.echo(f"               Local install: {local_support}")
+        click.echo()
+
+    click.echo("Usage:")
+    click.echo("  bdb install <agent>    Install hooks for an agent")
+    click.echo("  bdb uninstall <agent>  Remove hooks from an agent")
+
+
+@main.command()
 @click.option(
     "--global",
     "use_global",
     is_flag=True,
-    help="Show all installations (highlights active config in cyan)",
+    help="Show all installations (not just current workspace)",
 )
-def status(use_global: bool) -> None:
-    """Show BDB installation status.
+@click.option(
+    "--fix",
+    "do_fix",
+    is_flag=True,
+    help="Automatically fix detected issues",
+)
+@click.option(
+    "--test-connection",
+    is_flag=True,
+    help="Test LLM API connectivity",
+)
+def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
+    """Show BDB status and health.
 
-    By default, shows only the config for the current location:
-    - Local config if in a git repository with BDB installed
-    - Global config otherwise
+    Displays configuration, installations, and any detected issues.
+
+    \b
+    By default, shows only the current workspace:
+    - Local installations if in a git repository
+    - Global installations otherwise
 
     Use --global to see all installations.
+    Use --fix to automatically repair detected issues.
+    Use --test-connection to verify LLM API connectivity.
     """
+    from drinkingbird.doctor import diagnose_global, diagnose_local, fix_issues
     from drinkingbird.manifest import Installation, Manifest
 
-    manifest = Manifest.load()
+    click.echo("BDB Status")
+    click.echo("=" * 40)
 
-    # Determine active scope for current directory
+    # Show pause status first
+    paused, sentinel_path = is_paused()
+    if paused:
+        click.secho("⏸  PAUSED", fg="yellow", bold=True)
+        if sentinel_path:
+            click.echo(f"   {sentinel_path}")
+        click.echo()
+
+    # Config section
+    click.echo("Config")
+    click.echo("-" * 40)
+    config_path = ensure_config()
+    click.echo(f"  File: {config_path}")
+
+    try:
+        config = load_config()
+        click.secho("  Syntax: OK", fg="green")
+    except ConfigError as e:
+        click.secho(f"  Syntax: FAILED - {e}", fg="red")
+        config = None
+
+    if config:
+        # Check permissions
+        mode = CONFIG_PATH.stat().st_mode
+        if (mode & 0o077) != 0:
+            click.secho("  Permissions: WARNING - readable by others", fg="yellow")
+        else:
+            click.echo("  Permissions: OK (600)")
+
+        # Show API key status
+        api_key = config.llm.get_api_key()
+        if api_key:
+            masked = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
+            click.echo(f"  API key: {masked}")
+            click.echo(f"  Provider: {config.llm.provider}")
+            click.echo(f"  Model: {config.llm.model}")
+        else:
+            click.secho("  API key: NOT CONFIGURED", fg="yellow")
+            click.echo("  (Hooks will allow all actions without supervision)")
+
+        # Test LLM connectivity if requested
+        if test_connection and api_key:
+            click.echo()
+            click.echo("Testing LLM connection...")
+            from drinkingbird.supervisor import get_llm_provider
+
+            provider = get_llm_provider(config)
+            if provider:
+                try:
+                    response = provider.call(
+                        system_prompt="Reply with exactly: {\"status\": \"ok\"}",
+                        user_prompt="Test connection",
+                        response_schema={
+                            "type": "object",
+                            "properties": {"status": {"type": "string"}},
+                            "required": ["status"],
+                            "additionalProperties": False,
+                        },
+                    )
+                    if response.success:
+                        click.secho("  Connection: OK", fg="green")
+                    else:
+                        click.secho(f"  Connection: FAILED - {response.content}", fg="red")
+                except Exception as e:
+                    click.secho(f"  Connection: FAILED - {e}", fg="red")
+        elif test_connection and not api_key:
+            click.secho("  Cannot test connection: no API key configured", fg="yellow")
+
+    # Installations section
+    click.echo()
+    click.echo("Installations")
+    click.echo("-" * 40)
+
+    manifest = Manifest.load()
     workspace = get_workspace_root()
+
     if workspace:
         active_scope = "local"
         active_path = str(workspace)
@@ -294,33 +427,14 @@ def status(use_global: bool) -> None:
         installations = manifest.get()
     else:
         installations = manifest.get(scope=active_scope)
-        # Filter local installations to match current workspace
         if active_scope == "local" and active_path:
             installations = [i for i in installations if active_path in i.path]
-
-    if not installations:
-        click.echo("No BDB installations found.")
-        click.echo()
-        click.echo("To install hooks, run:")
-        click.echo("  bdb install claude-code")
-        return
-
-    click.echo("BDB Installation Status")
-    click.echo("=" * 40)
-
-    # Show pause status
-    paused, sentinel_path = is_paused()
-    if paused:
-        click.secho("⏸  PAUSED", fg="yellow", bold=True)
-        if sentinel_path:
-            click.echo(f"   {sentinel_path}")
 
     # Clean up missing installations and group by agent
     by_agent: dict[str, list] = {}
     removed_count = 0
     for inst in installations:
         if not Path(inst.path).exists():
-            # Config file missing - remove from manifest
             manifest.remove(path=inst.path)
             removed_count += 1
             continue
@@ -330,191 +444,62 @@ def status(use_global: bool) -> None:
 
     if removed_count > 0:
         manifest.save()
-        click.secho(
-            f"Cleaned up {removed_count} stale installation(s)", fg="yellow"
-        )
+        click.secho(f"  Cleaned up {removed_count} stale installation(s)", fg="yellow")
 
     if not by_agent:
-        click.echo("No BDB installations found.")
+        click.echo("  No installations found.")
         click.echo()
-        click.echo("To install hooks, run:")
-        click.echo("  bdb install claude-code")
-        return
+        click.echo("  To install hooks, run:")
+        click.echo("    bdb install claude-code")
+    else:
+        for agent in sorted(by_agent.keys()):
+            for inst in by_agent[agent]:
+                date_str = inst.installed_at[:10] if inst.installed_at else "unknown"
+                line = f"  ✓ {agent} ({inst.scope}): {inst.path}"
 
-    for agent in sorted(by_agent.keys()):
+                if use_global and is_active(inst):
+                    click.secho(line, fg="cyan")
+                else:
+                    click.echo(line)
+                click.echo(f"      installed: {date_str}")
+
+        total = sum(len(insts) for insts in by_agent.values())
         click.echo()
-        click.echo(f"{agent}:")
-        for inst in by_agent[agent]:
-            # Parse date from ISO format
-            date_str = inst.installed_at[:10] if inst.installed_at else "unknown"
-            line = f"  ✓ {inst.scope}: {inst.path}"
+        click.echo(f"  Total: {total} installation(s)")
 
-            # Highlight active config in cyan when showing all
-            if use_global and is_active(inst):
-                click.secho(line, fg="cyan")
-            else:
-                click.echo(line)
-            click.echo(f"      installed: {date_str}")
-
-    total = sum(len(insts) for insts in by_agent.values())
+    # Health check section
     click.echo()
-    click.echo(f"Total: {total} installation(s)")
-
-
-@main.command()
-@click.option("--global", "use_global", is_flag=True, help="Check all installations (not just current workspace)")
-@click.option("--fix", "do_fix", is_flag=True, help="Automatically fix detected issues")
-def doctor(use_global: bool, do_fix: bool) -> None:
-    """Diagnose and fix installation health.
-
-    Compares the installation manifest against actual config files
-    to find discrepancies:
-
-    \b
-    - Manifest entries where config/hooks are missing
-    - Config files with bdb hooks not tracked in manifest
-    - Unknown or stale manifest entries
-
-    By default, only checks the current workspace (local scope).
-    Use --global to check all installations.
-
-    Use --fix to automatically repair issues:
-
-    \b
-    - Removes stale manifest entries
-    - Adds untracked installations to manifest
-    """
-    from drinkingbird.doctor import diagnose_global, diagnose_local, fix_issues
+    click.echo("Health")
+    click.echo("-" * 40)
 
     if use_global:
-        click.echo("Checking all installations...")
         issues = diagnose_global()
     else:
-        workspace = get_workspace_root()
         if workspace:
-            click.echo(f"Checking workspace: {workspace}")
             issues = diagnose_local(workspace)
         else:
-            click.echo("Not in a git repository. Use --global to check all installations.")
-            sys.exit(1)
+            issues = diagnose_global()
 
     if not issues:
-        click.echo()
-        click.echo("No issues found. Installation is healthy.")
-        return
-
-    click.echo()
-    click.echo(f"Found {len(issues)} issue(s):")
-    click.echo()
-
-    for issue in issues:
-        click.echo(f"  {issue}")
-
-    if do_fix:
-        click.echo()
-        click.echo("Applying fixes...")
-        fixes = fix_issues(issues)
-        for fix in fixes:
-            click.echo(f"  ✓ {fix}")
-        click.echo()
-        click.echo("Fixes applied. Run 'bdb doctor' again to verify.")
+        click.secho("  No issues found.", fg="green")
     else:
-        click.echo()
-        click.echo("Run 'bdb doctor --fix' to automatically fix these issues.")
+        click.echo(f"  Found {len(issues)} issue(s):")
+        for issue in issues:
+            click.echo(f"    {issue}")
 
-
-@main.command()
-def check() -> None:
-    """Validate configuration and connectivity.
-
-    Checks:
-    - Config file exists and is valid YAML
-    - File permissions are secure (600)
-    - API key is configured
-    - LLM provider is reachable
-    """
-    click.echo("Checking configuration...")
-
-    # Ensure config file exists (auto-create if needed)
-    config_path = ensure_config()
-    click.echo(f"  Config file: {config_path}")
-
-    # Load and validate config
-    try:
-        config = load_config()
-        click.echo("  Config syntax: OK")
-    except ConfigError as e:
-        click.echo(f"  Config syntax: FAILED - {e}", err=True)
-        sys.exit(1)
-
-    # Check permissions
-    mode = CONFIG_PATH.stat().st_mode
-    if (mode & 0o077) != 0:
-        click.echo("  Permissions: WARNING - file is readable by others")
-        click.echo(f"  Run: chmod 600 {CONFIG_PATH}")
-    else:
-        click.echo("  Permissions: OK (600)")
-
-    # Check API key
-    api_key = config.llm.get_api_key()
-    if api_key:
-        masked = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
-        click.echo(f"  API key: {masked}")
-    else:
-        click.secho("  API key: NOT CONFIGURED", fg="yellow")
-        click.echo()
-        click.echo("  BDB needs an LLM API key to evaluate agent behavior.")
-        click.echo("  Without it, hooks will allow all actions (no supervision).")
-        click.echo()
-        click.echo("  To configure, edit ~/.bdb/config.yaml:")
-        if config.llm.provider == "openai":
-            click.echo("    llm:")
-            click.echo("      api_key: sk-...")
-            click.echo("    Or set OPENAI_API_KEY environment variable")
-        elif config.llm.provider == "anthropic":
-            click.echo("    llm:")
-            click.echo("      api_key: sk-ant-...")
-            click.echo("    Or set ANTHROPIC_API_KEY environment variable")
-        elif config.llm.provider == "azure":
-            click.echo("    llm:")
-            click.echo("      api_key: ...")
-            click.echo("      base_url: https://your-resource.openai.azure.com")
-            click.echo("      deployment: your-deployment-name")
+        if do_fix:
+            click.echo()
+            click.echo("  Applying fixes...")
+            fixes = fix_issues(issues)
+            for fix in fixes:
+                click.secho(f"    ✓ {fix}", fg="green")
         else:
-            click.echo("    llm:")
-            click.echo("      api_key: your-api-key-here")
+            click.echo()
+            click.echo("  Run 'bdb status --fix' to repair these issues.")
 
-    # Check LLM connectivity
-    if api_key:
-        click.echo(f"  LLM provider: {config.llm.provider}")
-        click.echo(f"  Model: {config.llm.model}")
 
-        # Try a simple API call
-        from drinkingbird.supervisor import get_llm_provider
 
-        provider = get_llm_provider(config)
-        if provider:
-            try:
-                response = provider.call(
-                    system_prompt="Reply with exactly: {\"status\": \"ok\"}",
-                    user_prompt="Test connection",
-                    response_schema={
-                        "type": "object",
-                        "properties": {"status": {"type": "string"}},
-                        "required": ["status"],
-                        "additionalProperties": False,
-                    },
-                )
-                if response.success:
-                    click.echo("  LLM connectivity: OK")
-                else:
-                    click.echo(f"  LLM connectivity: FAILED - {response.content}")
-            except Exception as e:
-                click.echo(f"  LLM connectivity: FAILED - {e}")
 
-    # Summary
-    click.echo()
-    click.echo("Configuration check complete.")
 
 
 @main.command()
@@ -615,6 +600,18 @@ def test(hook: str, transcript: str | None, command: str | None, error: str | No
     """Test a specific hook with sample input.
 
     Useful for verifying hook behavior without a full agent session.
+
+    \b
+    Examples:
+      bdb test stop --transcript ./conversation.jsonl
+      bdb test pre-tool --command "git reset --hard"
+      bdb test tool-failure --error "command not found"
+      bdb test pre-compact
+
+    \b
+    Transcript format (JSONL, one message per line):
+      {"role": "user", "content": "..."}
+      {"role": "assistant", "content": "..."}
     """
     from drinkingbird.supervisor import Supervisor
 
@@ -694,6 +691,77 @@ def config_show() -> None:
 def config_template() -> None:
     """Print configuration template to stdout."""
     click.echo(generate_template())
+
+
+@config.command("edit")
+def config_edit() -> None:
+    """Open configuration in your default editor.
+
+    Uses the EDITOR or VISUAL environment variable to determine
+    which editor to use. Falls back to system default if not set.
+    """
+    config_path = ensure_config()
+    click.edit(filename=str(config_path))
+
+
+@main.command()
+@click.option("--tail", "-f", is_flag=True, help="Follow log output (like tail -f)")
+@click.option("--errors", "-e", is_flag=True, help="Show error log instead of main log")
+@click.option("--lines", "-n", default=50, help="Number of lines to show")
+def logs(tail: bool, errors: bool, lines: int) -> None:
+    """View BDB logs.
+
+    Shows recent log entries from the BDB supervisor log.
+
+    \b
+    Examples:
+      bdb logs              # Show last 50 lines
+      bdb logs -n 100       # Show last 100 lines
+      bdb logs --errors     # Show error log
+      bdb logs --tail       # Follow log output
+    """
+    import subprocess
+
+    try:
+        config = load_config()
+        if errors:
+            log_path = config.logging.get_error_log_path()
+        else:
+            log_path = config.logging.get_log_path()
+    except ConfigError:
+        # Use defaults if config fails to load
+        log_dir = Path.home() / ".bdb"
+        log_path = log_dir / ("errors.log" if errors else "supervisor.log")
+
+    if not log_path.exists():
+        log_type = "error" if errors else "supervisor"
+        click.echo(f"No {log_type} log found at {log_path}")
+        click.echo("Logs are created when BDB hooks are triggered.")
+        return
+
+    if tail:
+        # Use tail -f for following
+        click.echo(f"Following {log_path} (Ctrl+C to stop)")
+        try:
+            subprocess.run(["tail", "-f", str(log_path)], check=True)
+        except KeyboardInterrupt:
+            pass
+    else:
+        # Show last N lines
+        try:
+            result = subprocess.run(
+                ["tail", "-n", str(lines), str(log_path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            click.echo(result.stdout)
+        except subprocess.CalledProcessError:
+            # Fallback: read file directly
+            with open(log_path) as f:
+                all_lines = f.readlines()
+                for line in all_lines[-lines:]:
+                    click.echo(line, nl=False)
 
 
 @main.command()

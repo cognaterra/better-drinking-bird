@@ -46,7 +46,7 @@ bdb install claude-code  # or cursor, copilot
 
 ## Configuration
 
-Configuration lives in `~/.bdbrc` (YAML format with 600 permissions for security).
+Configuration lives in `~/.bdb/config.yaml` (YAML format with 600 permissions for security).
 
 See [config.example.yaml](config.example.yaml) for a complete example with all options.
 
@@ -94,14 +94,20 @@ hooks:
 ## CLI Commands
 
 ```bash
+# List supported agents
+bdb agents
+
 # Install hooks for an agent (creates config automatically)
 bdb install claude-code
 bdb install cursor
 bdb install copilot
 bdb install stdin  # Shows usage for generic piping
 
-# Validate configuration
-bdb check
+# Show status, config, and health
+bdb status                    # Show config + installations + issues
+bdb status --fix              # Auto-fix detected issues
+bdb status --test-connection  # Test LLM API connectivity
+bdb status --global           # Show all installations
 
 # Run in stdin/stdout mode (called by hooks)
 bdb run
@@ -113,8 +119,18 @@ bdb test tool-failure --error "command not found"
 bdb test pre-compact
 
 # Configuration management
-bdb config show
-bdb config template
+bdb config show      # Show current config
+bdb config template  # Print config template
+bdb config edit      # Open config in $EDITOR
+
+# View logs
+bdb logs              # Show last 50 lines
+bdb logs --tail       # Follow log output
+bdb logs --errors     # Show error log
+
+# Pause/resume supervision
+bdb pause             # Temporarily disable hooks
+bdb resume            # Re-enable hooks
 ```
 
 ## Swiss Army Knife Mode
@@ -276,7 +292,7 @@ BDB supports [Langfuse](https://langfuse.com) for observability and cost trackin
 ### Setup
 
 ```yaml
-# In ~/.bdbrc
+# In ~/.bdb/config.yaml
 tracing:
   enabled: true
   # Use environment variables (recommended)
