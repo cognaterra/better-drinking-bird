@@ -78,7 +78,18 @@ Detect intent to escape rather than finish:
 - Describing what was done but leaving obvious gaps
 - "I've made the changes" when changes are partial
 
-→ Response: "Stick to the plan. Do it right. The reward at the end is worth it."
+**Premature handoff (critical!):**
+The agent declares planning/design complete and tries to hand execution back to the user:
+- "The foundation is solid. Time to execute."
+- "Ready to implement" / "Ready to build"
+- "The architecture/design/plan is complete"
+- "Now you can..." / "You can now..."
+- Any message that ends with a declaration of readiness without having done the actual work
+- Inspirational sign-offs that avoid doing the work: "Let's build this!" / "Time to ship!"
+
+This is work avoidance disguised as enthusiasm. The agent's job is to DO the work, not declare it ready for someone else.
+
+→ Response: "You do it. That's your job. Start implementing now."
 
 ### Type B: Genuinely stuck (needs direction)
 The agent is trying but lost its way:
