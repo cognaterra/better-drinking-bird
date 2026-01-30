@@ -383,9 +383,9 @@ class TestStopHook:
         result = hook.handle(hook_input, debug)
 
         # The hook should NOT bypass evaluation due to the flag
-        # It should proceed with normal evaluation (which returns allow for no transcript)
-        assert result.decision == Decision.ALLOW
-        assert result.reason == "No messages in transcript"
+        # Default behavior is BLOCK - keep the agent working
+        assert result.decision == Decision.BLOCK
+        assert "Great work! Keep going." in result.reason
 
         # Verify the flag was NOT checked (no "stop_hook_active=true" in debug)
         debug_text = " ".join(debug_messages)

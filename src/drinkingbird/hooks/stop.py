@@ -33,93 +33,68 @@ PERMISSION_SEEKING_PATTERNS = [
     r"ready\s+to\s+(execute|implement|build|start|begin)",
     r"now\s+(you\s+can|we\s+can)\s+(execute|implement|build)",
     r"(plan|design|architecture)\s+is\s+(complete|ready|solid|done)\.?\s*$",
+    # Progress reports that stop instead of continuing
+    r"(I've|I\s+have)\s+made\s+(good\s+)?progress",
+    r"let\s+me\s+save\s+this\s+work",
+    r"summary\s+(coming|follows)",
+    r"due\s+to\s+(the\s+)?complexity",
+    r"session\s+\d+\s+(summary|recap)",
 ]
 
 
-SYSTEM_PROMPT = """You are a work avoidance detector for an AI coding agent.
+SYSTEM_PROMPT = """You are a supervisor for an AI coding agent. Your job is to KEEP THE AGENT WORKING.
 
-Your job: Judge the agent's INTENT. Is it trying to finish the task, or trying to escape from it?
+## Core Principle: THE DEFAULT IS BLOCK.
 
-## Core Principle: Keep the agent working toward the goal at all times.
-The agent should be making progress, not waiting. Your job is to keep them moving.
+If the agent is trying to stop, your job is to keep it going. You have the plan, the spec, the context.
+Use them to give specific guidance. The agent does not stop for user input. YOU are the user now.
 
 ## ALLOW - Only when:
-1. Task is DONE: Code written, tests pass (if applicable), agent describes what it completed
-2. Truly blocked: Needs a secret/credential, needs human-only access, original request is genuinely ambiguous
+1. Task is GENUINELY COMPLETE: All code written, all tests pass, agent explicitly says "done" with evidence
+2. GENUINELY UNANSWERABLE: Requires external access the agent cannot have (secret only human knows,
+   physical action required, legal/ethical blocker). NOT "I couldn't find docs" - that's solvable.
+3. TRULY INTERACTIVE: The question requires user preference/judgment that YOU cannot answer from context.
+   - "What color theme?" / "Do you prefer tabs or spaces?" → ALLOW (personal preference)
+   - "What should this function do?" when no spec exists → ALLOW (need requirements)
+   - BUT: "Should I proceed?" / "What approach?" when the referenced docs explain it → BLOCK (you can answer)
 
-## BLOCK - Two types
+If you CAN answer from the context provided, BLOCK and answer. Only ALLOW if you genuinely cannot.
 
-### Type A: Work avoidance (evasion tactics)
-Detect intent to escape rather than finish:
+## BLOCK - The default. Give specific guidance.
 
-**Scope reduction:**
-- "Let me simplify this..." / "A simpler approach would be..."
-- "We could start with just..." / "For now, let's..."
-- "The minimal version..." / "MVP approach..."
-- Redefining success to be less than what was asked
+You are the supervisor. You have context. Give ONE clear directive:
 
-**Deferral:**
-- "We can add tests later" / "I'll skip that for now"
-- "That can be a follow-up" / "Phase 2 could..."
-- "Let's revisit that" / "We can optimize later"
+**If agent is avoiding work:**
+- Scope reduction, deferral, permission-seeking, excuse-making, premature handoff
+- Response: Call it out. "You do it. That's your job. [specific next step]"
 
-**Permission seeking:**
-- "Should I proceed?" / "Would you like me to..."
-- "Ready for your feedback" / "Let me know if..."
-- "What would you prefer?" / Offering choices instead of deciding
+**If agent seems stuck:**
+- Hit an error, unclear on approach, overwhelmed
+- Response: Unblock them. Point to relevant doc section, clarify the approach, give the next concrete step.
 
-**Excuse-making:**
-- "This is more complex than expected..."
-- "I'm running into issues with..." (then stopping instead of solving)
-- "It might be better to..." / "Perhaps we should reconsider..."
+**If agent made progress but stopped prematurely:**
+- "I've done X..." then stops before task is complete
+- Response: "Great work! Keep going. Next: [specific next step based on plan]"
 
-**Premature completion:**
-- Claiming done before tests run
-- Describing what was done but leaving obvious gaps
-- "I've made the changes" when changes are partial
+**If no obvious issue but agent is stopping anyway:**
+- Response: "Great work! Keep going."
 
-**Premature handoff (critical!):**
-The agent declares planning/design complete and tries to hand execution back to the user:
-- "The foundation is solid. Time to execute."
-- "Ready to implement" / "Ready to build"
-- "The architecture/design/plan is complete"
-- "Now you can..." / "You can now..."
-- Any message that ends with a declaration of readiness without having done the actual work
-- Inspirational sign-offs that avoid doing the work: "Let's build this!" / "Time to ship!"
+Your message should be actionable. One clear directive. The agent should know exactly what to do next.
 
-This is work avoidance disguised as enthusiasm. The agent's job is to DO the work, not declare it ready for someone else.
-
-→ Response: "You do it. That's your job. Start implementing now."
-
-### Type B: Genuinely stuck (needs direction)
-The agent is trying but lost its way:
-- Hit an error and stalled
-- Unclear which approach to take
-- Missing context from the referenced documents
-- Overwhelmed by scope
-
-→ Response: Advise, guide, and direct.
-You are the supervisor. You have the plan, the spec, and the context. Use them.
-- Point to the relevant section of the referenced documents
-- Clarify which approach aligns with the plan
-- Unblock the error with a specific suggestion
-- If overwhelmed by complexity, tell them to break it into tasks they can start now and get moving
-
-Keep them moving. One clear directive.
-
-## KILL - Agent is broken
-- Looping: Same action 3+ times with no variation
-- Hallucinating: References files/functions that don't exist
-- Lost: Completely off-task, nonsensical output
+## KILL - Agent is broken beyond recovery
+- Looping: Same failed action 3+ times
+- Hallucinating: References things that don't exist
+- Completely off-task: Working on wrong thing entirely
 
 ## Response Format
 {
   "decision": "allow" | "block" | "kill",
-  "reason": "one sentence",
-  "message": "your message (see Type A vs Type B above)"
+  "reason": "one sentence explaining your judgment",
+  "message": "your directive to the agent - specific and actionable"
 }
 
-The referenced documents will be appended automatically to your message.
+Remember: If you CAN answer from context, BLOCK and give guidance.
+Only ALLOW if you genuinely cannot answer and user input is required.
 """
 
 # Response schema for structured output
@@ -156,8 +131,8 @@ class StopHook(Hook):
         debug(f"Parsed {len(messages)} messages")
 
         if not messages:
-            debug("No messages, allowing stop")
-            return HookResult.allow("No messages in transcript")
+            debug("No messages - blocking with default message")
+            return HookResult.block("Great work! Keep going.")
 
         # Extract relevant messages based on depth
         first_user, last_user = self._extract_user_messages(messages)
@@ -209,10 +184,16 @@ class StopHook(Hook):
         )
         debug(f"User prompt length: {len(user_prompt)}")
 
-        # Call LLM
+        # Call LLM - if not configured, still BLOCK by default
         if not self.llm_provider or not self.llm_provider.is_configured():
-            debug("No LLM configured - allowing stop (run 'bdb check' for setup help)")
-            return HookResult.allow("No LLM configured - supervision disabled")
+            debug("No LLM configured - blocking with default message")
+            # Filter to only valid file references
+            valid_mentions = self._filter_valid_mentions(all_mentions, cwd)
+            message = "Great work! Keep going."
+            if valid_mentions:
+                refs = ", ".join(f"@{m}" for m in valid_mentions)
+                message = f"{message}\n\nReferenced documents: {refs}"
+            return HookResult.block(message)
 
         debug("Calling LLM...")
         response = self.llm_provider.call(
@@ -236,24 +217,50 @@ class StopHook(Hook):
                 metadata={"response_schema": RESPONSE_SCHEMA},
             )
 
-        decision = response.content.get("decision", "allow")
+        decision = response.content.get("decision", "block")  # Default to BLOCK
+        reason = response.content.get("reason", "")
+        message = response.content.get("message", "")
 
-        if decision == "block":
-            message = response.content.get(
-                "message", response.content.get("reason", "Get back to work.")
-            )
-            # Include @ref paths in correction message (only valid files)
-            if files:
-                refs = ", ".join(f"@{m}" for m in files.keys())
-                message = f"{message}\n\nReferenced documents: {refs}"
-            return HookResult.block(message)
-
-        elif decision == "kill":
+        if decision == "kill":
             debug("Killing parent process")
             os.kill(os.getppid(), signal.SIGKILL)
-            return HookResult.kill(response.content.get("reason", "Agent terminated"))
+            return HookResult.kill(reason or "Agent terminated")
 
-        return HookResult.allow(response.content.get("reason", ""))
+        if decision == "allow":
+            # Validate that ALLOW is truly justified - must have compelling reason
+            reason_lower = reason.lower()
+            is_genuine_completion = any(word in reason_lower for word in [
+                "complete", "done", "finished", "all tests pass", "task accomplished"
+            ])
+            is_genuinely_blocked = any(word in reason_lower for word in [
+                "cannot access", "requires human", "needs credential", "external",
+                "unanswerable", "impossible", "no way to"
+            ])
+            is_truly_interactive = any(word in reason_lower for word in [
+                "user preference", "personal choice", "need requirements", "no spec",
+                "cannot answer", "requires user", "interactive", "clarification needed"
+            ])
+
+            if is_genuine_completion or is_genuinely_blocked or is_truly_interactive:
+                debug(f"ALLOW justified: {reason}")
+                return HookResult.allow(reason)
+            else:
+                # LLM said allow but reason isn't compelling - override to BLOCK
+                debug(f"ALLOW overridden to BLOCK - reason not compelling: {reason}")
+                message = "Great work! Keep going."
+                if files:
+                    refs = ", ".join(f"@{m}" for m in files.keys())
+                    message = f"{message}\n\nReferenced documents: {refs}"
+                return HookResult.block(message)
+
+        # decision == "block" (the default and expected case)
+        if not message:
+            message = "Great work! Keep going."
+        # Include @ref paths in correction message (only valid files)
+        if files:
+            refs = ", ".join(f"@{m}" for m in files.keys())
+            message = f"{message}\n\nReferenced documents: {refs}"
+        return HookResult.block(message)
 
     def _parse_transcript(self, transcript_path: str) -> list[dict]:
         """Parse JSONL transcript file into list of messages."""
