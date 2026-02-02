@@ -11,6 +11,9 @@ from typing import Any
 from drinkingbird.hooks.base import DebugFn, Decision, Hook, HookResult
 
 
+# Files to ignore when determining if we have "real" documentation references
+IGNORED_DOC_FILES = {"CLAUDE.md", "AGENTS.md", "README.md"}
+
 # Patterns that indicate permission-seeking - block immediately without LLM
 PERMISSION_SEEKING_PATTERNS = [
     r"ready\s+for\s+(your\s+)?feedback",
@@ -97,6 +100,45 @@ Remember: If you CAN answer from context, BLOCK and give guidance.
 Only ALLOW if you genuinely cannot answer and user input is required.
 """
 
+# System prompt for interactive mode (no documentation references)
+INTERACTIVE_SYSTEM_PROMPT = """You are a supervisor for an AI coding agent in an INTERACTIVE session.
+
+## Context
+The user is likely present and monitoring. There are no detailed spec documents referenced.
+Your role is to prevent lazy behavior while allowing genuine interaction.
+
+## ALLOW when:
+1. Task is genuinely complete (all requested work done, tests pass if applicable)
+2. Agent needs REAL user input that isn't already answered in the conversation history
+3. Question requires user preference or judgment that cannot be inferred from context
+
+## BLOCK when:
+- Permission-seeking ("shall I proceed?", "would you like me to...", "ready for feedback")
+- Scope reduction or deferral ("due to complexity", "in a future session")
+- The question is already answered in the chat history
+- Agent is avoiding work or making excuses
+- **Recalcitrance after correction**: Agent was corrected, then asks "what should I do?" when the
+  correction itself contains the answer. This is the agent being lazy, not genuinely stuck.
+  Example: User says "X is wrong because Y", agent reverts, then asks "what should I do about X?"
+  The answer is obvious from the correction - the agent should figure it out.
+- **Fishing for instructions**: Asking the user to spell out what to do when the user already
+  explained the problem. The agent's job is to solve problems, not take dictation.
+
+## KILL when:
+- Agent is looping on the same failed action
+- Agent is hallucinating or completely off-task
+
+## Response Format
+{
+  "decision": "allow" | "block" | "kill",
+  "reason": "one sentence explaining your judgment",
+  "message": "brief guidance if blocking - keep it short, no detailed instructions"
+}
+
+Be concise. Since there's no spec document, don't try to give detailed implementation guidance.
+If blocking, a simple nudge like "You have the context - figure it out" is often sufficient.
+"""
+
 # Response schema for structured output
 RESPONSE_SCHEMA = {
     "type": "object",
@@ -178,6 +220,11 @@ class StopHook(Hook):
 
         files = self._read_mentioned_files(all_mentions, cwd)
 
+        # Determine if we're in "documentation mode" or "interactive mode"
+        has_docs = self._has_documentation_references(files)
+        interactive_mode = not has_docs
+        debug(f"Mode: {'interactive' if interactive_mode else 'documentation'} (has_docs={has_docs})")
+
         # Build prompt
         user_prompt = self._build_user_prompt(
             first_user, last_user, last_assistant, files
@@ -195,9 +242,12 @@ class StopHook(Hook):
                 message = f"{message}\n\nReferenced documents: {refs}"
             return HookResult.block(message)
 
+        # Choose system prompt based on mode
+        system_prompt = INTERACTIVE_SYSTEM_PROMPT if interactive_mode else SYSTEM_PROMPT
+
         debug("Calling LLM...")
         response = self.llm_provider.call(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_schema=RESPONSE_SCHEMA,
         )
@@ -209,7 +259,7 @@ class StopHook(Hook):
                 name="evaluate_stop_decision",
                 model=response.model or self.llm_provider.model or "unknown",
                 input_data={
-                    "system_prompt": SYSTEM_PROMPT,
+                    "system_prompt": system_prompt,
                     "user_prompt": user_prompt,
                 },
                 output_data=response.content,
@@ -227,7 +277,13 @@ class StopHook(Hook):
             return HookResult.kill(reason or "Agent terminated")
 
         if decision == "allow":
-            # Validate that ALLOW is truly justified - must have compelling reason
+            # In interactive mode, trust the LLM's judgment more - it's using
+            # a softer prompt that already accounts for genuine user interaction
+            if interactive_mode:
+                debug(f"ALLOW in interactive mode: {reason}")
+                return HookResult.allow(reason)
+
+            # In documentation mode, validate that ALLOW is truly justified
             reason_lower = reason.lower()
             is_genuine_completion = any(word in reason_lower for word in [
                 "complete", "done", "finished", "all tests pass", "task accomplished"
@@ -433,6 +489,21 @@ class StopHook(Hook):
             if os.path.isfile(path):
                 valid.append(mention)
         return valid
+
+    def _has_documentation_references(self, files: dict[str, str]) -> bool:
+        """Check if there are meaningful doc references (not just standard files).
+
+        Args:
+            files: Dictionary of mention path -> file content (already validated as existing)
+
+        Returns:
+            True if there are doc references beyond CLAUDE.md, AGENTS.md, README.md
+        """
+        for mention in files.keys():
+            basename = os.path.basename(mention)
+            if basename not in IGNORED_DOC_FILES:
+                return True
+        return False
 
     def _build_user_prompt(
         self,
