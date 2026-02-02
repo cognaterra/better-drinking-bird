@@ -25,7 +25,10 @@ In the famous Simpsons episode, Homer uses a drinking bird toy to repeatedly pre
 ## Installation
 
 ```bash
-# Install with pipx (recommended)
+# Install with uv (recommended)
+uv tool install better-drinking-bird
+
+# Or with pipx
 pipx install better-drinking-bird
 
 # Or with pip
