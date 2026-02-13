@@ -126,8 +126,10 @@ class TestIsPaused:
         global_sentinel = global_dir / SENTINEL_NAME
         global_sentinel.write_text("{}")
 
-        local_sentinel = tmp_path / "workspace" / SENTINEL_NAME
-        local_sentinel.parent.mkdir()
+        # Local sentinel is now inside .bdb/ directory
+        local_bdb_dir = tmp_path / "workspace" / ".bdb"
+        local_bdb_dir.mkdir(parents=True)
+        local_sentinel = local_bdb_dir / SENTINEL_NAME
         local_sentinel.write_text("{}")
 
         monkeypatch.setattr("drinkingbird.pause.GLOBAL_SENTINEL", global_sentinel)
@@ -176,7 +178,8 @@ class TestPauseCLI:
         result = runner.invoke(main, ["pause"])
 
         assert result.exit_code == 0
-        assert (tmp_path / SENTINEL_NAME).exists()
+        # Local sentinel is now inside .bdb/ directory
+        assert (tmp_path / ".bdb" / SENTINEL_NAME).exists()
 
     def test_pause_creates_global_sentinel_outside_git(self, tmp_path, monkeypatch):
         """Test that pause creates global sentinel outside git repo."""

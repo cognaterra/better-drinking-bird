@@ -11,7 +11,9 @@ import yaml
 from drinkingbird.config import (
     Config,
     ConfigError,
+    _update_gitignore,
     check_permissions,
+    ensure_config,
     generate_template,
     load_config,
     save_template,
@@ -218,3 +220,101 @@ class TestTemplate:
         assert isinstance(data, dict)
         assert "llm" in data
         assert "hooks" in data
+
+
+class TestUpdateGitignore:
+    """Tests for _update_gitignore function."""
+
+    def test_creates_gitignore_if_missing(self, tmp_path):
+        """Test that .gitignore is created if it doesn't exist."""
+        _update_gitignore(tmp_path)
+
+        gitignore = tmp_path / ".gitignore"
+        assert gitignore.exists()
+        content = gitignore.read_text()
+        assert "# better-drinking-bird" in content
+        assert ".bdb/" in content
+        # .bdb-paused is now inside .bdb/, so only .bdb/ is needed
+
+    def test_appends_to_existing_gitignore(self, tmp_path):
+        """Test that entries are appended to existing .gitignore."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("node_modules/\n*.pyc\n")
+
+        _update_gitignore(tmp_path)
+
+        content = gitignore.read_text()
+        assert "node_modules/" in content
+        assert "*.pyc" in content
+        assert "# better-drinking-bird" in content
+        assert ".bdb/" in content
+
+    def test_does_not_duplicate_entries(self, tmp_path):
+        """Test that entries aren't added if already present."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".bdb/\n")
+
+        _update_gitignore(tmp_path)
+
+        content = gitignore.read_text()
+        assert content.count(".bdb/") == 1
+
+    def test_adds_only_missing_entries(self, tmp_path):
+        """Test that only missing entries are added."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("node_modules/\n")
+
+        _update_gitignore(tmp_path)
+
+        content = gitignore.read_text()
+        assert "node_modules/" in content
+        assert ".bdb/" in content
+
+    def test_handles_gitignore_without_trailing_newline(self, tmp_path):
+        """Test that entries are properly added when .gitignore lacks trailing newline."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("node_modules/")  # No trailing newline
+
+        _update_gitignore(tmp_path)
+
+        content = gitignore.read_text()
+        lines = content.splitlines()
+        assert "node_modules/" in lines
+        assert ".bdb/" in lines
+
+
+class TestEnsureConfigGitignore:
+    """Tests for ensure_config's gitignore integration."""
+
+    def test_updates_gitignore_in_git_repo(self, tmp_path, monkeypatch):
+        """Test that ensure_config updates .gitignore when in a git repo."""
+        # Create a fake git repo
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+
+        # Mock the config paths and cwd
+        config_path = tmp_path / ".bdb" / "config.yaml"
+        monkeypatch.setattr("drinkingbird.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("drinkingbird.config.LEGACY_CONFIG_PATH", tmp_path / ".bdbrc")
+        monkeypatch.chdir(tmp_path)
+
+        ensure_config()
+
+        gitignore = tmp_path / ".gitignore"
+        assert gitignore.exists()
+        content = gitignore.read_text()
+        assert ".bdb/" in content
+
+    def test_skips_gitignore_outside_git_repo(self, tmp_path, monkeypatch):
+        """Test that ensure_config doesn't create .gitignore outside git repos."""
+        # No .git directory
+
+        config_path = tmp_path / ".bdb" / "config.yaml"
+        monkeypatch.setattr("drinkingbird.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("drinkingbird.config.LEGACY_CONFIG_PATH", tmp_path / ".bdbrc")
+        monkeypatch.chdir(tmp_path)
+
+        ensure_config()
+
+        gitignore = tmp_path / ".gitignore"
+        assert not gitignore.exists()

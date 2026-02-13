@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from drinkingbird.config import Config, load_config
+from drinkingbird.mode import Mode, get_mode
 from drinkingbird.pause import is_paused
 from drinkingbird.hooks import (
     Hook,
@@ -188,6 +189,12 @@ class Supervisor:
         if paused:
             self.debug(f"BDB paused via {sentinel_path}", cwd=cwd)
             return HookResult.allow("BDB is paused")
+
+        # Check mode - interactive mode skips Stop hook (safety hooks still run)
+        mode = get_mode()
+        if event_name == "Stop" and mode == Mode.INTERACTIVE:
+            self.debug("Interactive mode - allowing stop", cwd=cwd)
+            return HookResult.allow("Interactive mode")
 
         # Get appropriate hook (pass tracer for LLM tracing)
         hook = get_hook(event_name, self.config, self.llm_provider, self.tracer)

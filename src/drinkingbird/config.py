@@ -468,10 +468,55 @@ def save_template(path: Path | None = None) -> Path:
     return config_path
 
 
+def _get_git_root() -> Path | None:
+    """Get git repo root from cwd, or None if not in a repo."""
+    current = Path.cwd().resolve()
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+    return None
+
+
+def _update_gitignore(git_root: Path) -> None:
+    """Add .bdb/ to .gitignore if not already present."""
+    gitignore_path = git_root / ".gitignore"
+    comment = "# better-drinking-bird 🐦⛲"
+    entries_to_add = [".bdb/"]
+
+    # Read existing content
+    existing_lines: set[str] = set()
+    if gitignore_path.exists():
+        content = gitignore_path.read_text()
+        existing_lines = {line.strip() for line in content.splitlines()}
+    else:
+        content = ""
+
+    # Find entries that need to be added
+    missing = [entry for entry in entries_to_add if entry not in existing_lines]
+    if not missing:
+        return
+
+    # Append missing entries with comment (only if adding new entries)
+    if comment not in existing_lines:
+        lines_to_add = comment + "\n" + "\n".join(missing)
+    else:
+        lines_to_add = "\n".join(missing)
+    if content and not content.endswith("\n"):
+        lines_to_add = "\n" + lines_to_add
+    if not content:
+        lines_to_add = lines_to_add + "\n"
+    else:
+        lines_to_add = lines_to_add + "\n"
+
+    gitignore_path.write_text(content + lines_to_add)
+
+
 def ensure_config() -> Path:
     """Ensure config file exists, creating it if necessary.
 
     Handles legacy config migration from ~/.bdbrc to ~/.bdb/config.yaml.
+    Also updates .gitignore in the current git repository to ignore BDB files.
 
     Returns:
         Path to the config file
@@ -482,10 +527,14 @@ def ensure_config() -> Path:
     if LEGACY_CONFIG_PATH.exists() and not CONFIG_PATH.exists():
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(LEGACY_CONFIG_PATH), str(CONFIG_PATH))
-        return CONFIG_PATH
 
     # Create config if it doesn't exist
     if not CONFIG_PATH.exists():
         save_template()
+
+    # Update .gitignore if in a git repository
+    git_root = _get_git_root()
+    if git_root:
+        _update_gitignore(git_root)
 
     return CONFIG_PATH

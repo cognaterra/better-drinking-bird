@@ -208,4 +208,7 @@ __marimo__/
 
 # Claude Code
 .claude/
+
+# better-drinking-bird 🐦⛲
+.bdb/
 .bdb-paused

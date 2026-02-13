@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-SENTINEL_NAME = ".bdb-paused"
+SENTINEL_NAME = "paused"
 GLOBAL_SENTINEL = Path.home() / ".bdb" / SENTINEL_NAME
 
 
@@ -33,10 +33,13 @@ def get_workspace_root() -> Path | None:
 
 
 def get_local_sentinel() -> Path | None:
-    """Get local sentinel path if in git repo."""
+    """Get local sentinel path if in git repo.
+
+    Returns path inside .bdb/ directory to consolidate state files.
+    """
     root = get_workspace_root()
     if root:
-        return root / SENTINEL_NAME
+        return root / ".bdb" / SENTINEL_NAME
     return None
 
 

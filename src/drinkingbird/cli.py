@@ -17,6 +17,14 @@ from drinkingbird.config import (
     generate_template,
     load_config,
 )
+from drinkingbird.mode import (
+    GLOBAL_MODE_PATH,
+    Mode,
+    clear_mode,
+    get_local_mode_path,
+    get_mode_info,
+    set_mode,
+)
 from drinkingbird.pause import (
     GLOBAL_SENTINEL,
     create_sentinel,
@@ -774,6 +782,55 @@ def resume(use_global: bool) -> None:
         click.echo(f"BDB resumed: removed {sentinel}")
     else:
         click.echo("BDB is not paused.")
+
+
+@main.command("mode")
+@click.argument("new_mode", type=click.Choice(["default", "auto", "interactive"]), required=False)
+@click.option("--global", "use_global", is_flag=True, help="Set/clear global mode instead of local")
+@click.option("--clear", "do_clear", is_flag=True, help="Clear mode file (revert to default)")
+def mode_cmd(new_mode: str | None, use_global: bool, do_clear: bool) -> None:
+    """Get or set BDB supervision mode.
+
+    \b
+    Modes:
+      default      LLM infers session type and decision
+      auto         Same as default
+      interactive  Stop hook returns ALLOW (safety hooks still run)
+
+    \b
+    Examples:
+      bdb mode                  # Show current mode
+      bdb mode interactive      # Set local mode to interactive
+      bdb mode --global auto    # Set global mode to auto
+      bdb mode --clear          # Clear local mode file
+    """
+    if do_clear:
+        path = clear_mode(use_global=use_global)
+        if path:
+            click.echo(f"Cleared mode: {path}")
+        else:
+            scope = "global" if use_global else "local"
+            click.echo(f"No {scope} mode file to clear.")
+        return
+
+    if new_mode is None:
+        # Show current mode
+        current_mode, source = get_mode_info()
+        click.echo(f"Mode: {current_mode.value}")
+        if source:
+            click.echo(f"Source: {source}")
+        else:
+            click.echo("Source: default (no mode file)")
+        return
+
+    # Set mode
+    try:
+        mode_enum = Mode(new_mode)
+        path = set_mode(mode_enum, use_global=use_global)
+        click.echo(f"Mode set to {new_mode}: {path}")
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
