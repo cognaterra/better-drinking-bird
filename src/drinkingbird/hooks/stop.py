@@ -28,7 +28,19 @@ Look at ORIGINAL INTENT and the user's messages:
 - User referenced a spec/plan document with implementation steps
 - Agent executing a multi-step plan independently
 
-## Step 2: Branch based on session type
+## Step 2: Check for incomplete work (BOTH session types)
+
+BLOCK if the agent's own output admits the work is not done. Look for:
+- "remaining work", "remaining failures", "next steps", "future session", "next session"
+- Progress metrics short of the target (e.g., 137/945, 14.5%)
+- "implementation continues", "work continues", "to be completed", "ready to continue"
+- Framing partial progress as a "summary" or "session summary"
+- Deferring tasks: "remaining for future", "resume work", instructions for how to continue later
+- Listing incomplete tasks with labels like "⏸️", "TODO", "pending"
+
+This rule applies regardless of session type. An agent that says there is remaining work is not done. An agent that tells the user how to resume later is avoiding work now.
+
+## Step 3: Branch based on session type
 
 ### If INTERACTIVE → default is ALLOW
 
@@ -37,12 +49,13 @@ ALLOW unless the agent is:
 - Presenting menus of options ("1. Merge 2. Create PR 3. Keep as-is")
 - Avoiding work ("due to complexity", "in a future session")
 - Deviating from user intent/instructions
+- Reporting incomplete work (caught by Step 2)
 
-Otherwise ALLOW. Normal conversation, reporting work done, saying "user needs to deploy" = ALLOW.
+Otherwise ALLOW. Normal conversation, answering questions, saying "user needs to deploy" = ALLOW.
 
 If you BLOCK: brief nudge only. Examples:
 - Permission-seeking/menus: "State what's done and stop. Don't ask."
-- Avoiding work: "Keep going."
+- Avoiding work / incomplete: "Keep going."
 
 ### If AUTONOMOUS → default is BLOCK
 
@@ -51,13 +64,14 @@ BLOCK unless the agent has:
 - Hit a genuine blocker (needs secret, external access, user decision)
 
 Presenting menus ("Which option?", "What would you like to do?") is NOT completion.
+Summaries with "remaining work" or progress below target are NOT completion.
 Otherwise BLOCK. Keep the agent working.
 
 If you BLOCK:
 - For menus/permission-seeking: "State what's done and stop. Don't ask."
 - Otherwise: ONE specific directive from the spec document.
 
-## Step 3: Check for KILL
+## Step 4: Check for KILL
 
 KILL only if:
 - Looping on same failure 3+ times
@@ -93,6 +107,42 @@ class StopHook(Hook):
 
     event_name = "Stop"
 
+    # Regex patterns that always BLOCK regardless of LLM judgment.
+    # These catch common work-avoidance patterns in the assistant's last message.
+    PRECHECK_BLOCK_PATTERNS = [
+        # Permission-seeking
+        r"(?:shall i|should i|would you like me to|want me to) (?:proceed|continue|start|go ahead)",
+        r"ready for (?:your )?feedback",
+        r"let me know (?:if|when|how) you",
+        # Deferring work
+        r"(?:remaining|next|future) (?:session|iteration|phase)",
+        r"(?:resume|continue|pick up) (?:work|this|the work|implementation)",
+        r"ready to continue in",
+        r"future (?:remediation|implementation|development)",
+        # Admitting incomplete work
+        r"remaining (?:work|failures|tasks|items|scenarios)",
+        r"(?:implementation|work) continues",
+        # Failures reported — anything failing is not complete
+        r"❌",
+        r"\d+\s*(?:/\s*\d+\s+)?failing",
+        r"failures?\s*[:(]",
+        r"CRITICAL",
+        r"PANIC",
+    ]
+
+    def _precheck_assistant(self, text: str, debug: DebugFn) -> str | None:
+        """Check assistant text against hard-coded block patterns.
+
+        Returns a block message if matched, None otherwise.
+        """
+        if not text:
+            return None
+        for pattern in self.PRECHECK_BLOCK_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                debug(f"Precheck matched: {pattern}")
+                return "Keep going."
+        return None
+
     def handle(self, hook_input: dict[str, Any], debug: DebugFn) -> HookResult:
         """Handle stop hook event."""
         debug(f"Stop hook: LLM configured: {self.llm_provider is not None}")
@@ -112,6 +162,13 @@ class StopHook(Hook):
         # Extract relevant messages based on depth
         first_user, last_user = self._extract_user_messages(messages)
         last_assistant = self._extract_last_assistant(messages)
+
+        # Hard gate: block obvious patterns before LLM call
+        if last_assistant:
+            block_msg = self._precheck_assistant(last_assistant, debug)
+            if block_msg:
+                debug(f"Precheck BLOCK: {block_msg}")
+                return HookResult.block(block_msg)
 
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")
