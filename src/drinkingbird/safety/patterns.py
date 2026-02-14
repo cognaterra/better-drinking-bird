@@ -147,8 +147,18 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
             "dangerous_files",
         ),
     ],
-    # NOTE: git_history category removed - now handled by LLM classifier
-    # for intent-aware blocking (see command_classifier.py)
+    "git_history": [
+        SafetyPattern(
+            r"git\s+log\b(?!.*--oneline\s+-\d)",
+            "Don't dig through git history for bugs. Read the actual code.",
+            "git_history",
+        ),
+        SafetyPattern(
+            r"git\s+blame\b",
+            "Don't use git blame. Claude wrote those commits. Read the actual code.",
+            "git_history",
+        ),
+    ],
     "credential_access": [
         SafetyPattern(
             r"cat\s+.*\.env\b",
@@ -173,8 +183,7 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
     ],
 }
 
-# Allowed patterns that look like they might be blocked
-# NOTE: git show, git diff, git log now handled by LLM classifier
+# Allowed patterns that override blocks above
 ALLOWED_PATTERNS = [
     r"git\s+diff\b(?!.*HEAD~)",  # Diffing is fine, except HEAD~ comparisons
     r"git\s+status\b",  # Status is always fine

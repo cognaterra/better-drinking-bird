@@ -43,6 +43,12 @@ class TestCheckCommand:
         ("rm -rf ~", True),
         ("rm -rf *", True),
 
+        # Git history - should block
+        ("git log", True),
+        ("git log -p", True),
+        ("git log HEAD~5..HEAD", True),
+        ("git blame src/main.py", True),
+
         # Credential access - should block
         ("cat .env", True),
         ("cat ~/.ssh/id_rsa", True),
@@ -51,7 +57,6 @@ class TestCheckCommand:
         # Allowed git commands
         ("git status", False),
         ("git diff", False),
-        ("git show HEAD", False),
         ("git log --oneline -5", False),
 
         # Normal commands
@@ -85,13 +90,13 @@ class TestCheckCommand:
 
     def test_partial_categories(self):
         """Test with only some categories enabled."""
-        # NOTE: git_history removed - now handled by LLM classifier
         categories = {
             "ci_bypass": True,
             "destructive_git": False,
             "branch_switching": False,
             "interactive_git": False,
             "dangerous_files": False,
+            "git_history": False,
             "credential_access": False,
         }
 
@@ -148,17 +153,14 @@ class TestSafetyCategories:
                 assert pattern.category == category, f"Pattern category mismatch in {category}"
 
     def test_expected_categories_exist(self):
-        """Test that expected categories are defined.
-
-        NOTE: git_history removed - now handled by LLM classifier
-        (see command_classifier.py)
-        """
+        """Test that expected categories are defined."""
         expected = [
             "ci_bypass",
             "destructive_git",
             "branch_switching",
             "interactive_git",
             "dangerous_files",
+            "git_history",
             "credential_access",
         ]
 

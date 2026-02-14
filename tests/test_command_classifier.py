@@ -14,13 +14,7 @@ class TestNeedsLLMClassification:
     """Tests for needs_llm_classification function."""
 
     @pytest.mark.parametrize("command,expected", [
-        # Git history commands - need classification
-        ("git log", True),
-        ("git log -p", True),
-        ("git log HEAD~5..HEAD", True),
-        ("git show HEAD~1", True),
-        ("git diff HEAD~1", True),
-        ("git blame src/main.py", True),
+        # NOTE: git history commands handled by hard regex in patterns.py
         # Obfuscated/encoded commands - need classification
         ("echo aGVsbG8= | base64 -d", True),
         ("echo 68656c6c6f | xxd -r -p", True),
@@ -42,8 +36,6 @@ class TestNeedsLLMClassification:
         ("rm -rf ./node_modules/", False),
         ("rm -rf coverage/", False),
         # Always allowed - skip LLM
-        ("git log --oneline -5", False),
-        ("git status", False),
         ("ls -la", False),
         ("npm install", False),
         ("pytest", False),
@@ -59,55 +51,13 @@ class TestClassifyCommand:
     def test_no_llm_uses_fallback_block(self):
         """Test fallback when no LLM configured."""
         result = classify_command(
-            command="git log",
+            command="rm -rf some_unknown_dir",
             transcript_path=None,
             llm_provider=None,
             debug=lambda x: None,
         )
         assert result.is_blocked is True
         assert "fallback" in result.reason.lower()
-
-    def test_llm_allows_legitimate_git_log(self):
-        """Test LLM allows git log for commit message context."""
-        mock_llm = Mock()
-        mock_llm.is_configured.return_value = True
-        mock_llm.call.return_value = Mock(
-            content={
-                "decision": "allow",
-                "category": "git_history",
-                "reason": "Getting commit style for writing commit message",
-                "message": "",
-            }
-        )
-
-        result = classify_command(
-            command="git log --oneline -20",
-            transcript_path=None,
-            llm_provider=mock_llm,
-            debug=lambda x: None,
-        )
-        assert result.is_blocked is False
-
-    def test_llm_blocks_git_debugging(self):
-        """Test LLM blocks git history used for debugging."""
-        mock_llm = Mock()
-        mock_llm.is_configured.return_value = True
-        mock_llm.call.return_value = Mock(
-            content={
-                "decision": "block",
-                "category": "git_history",
-                "reason": "Debugging via git history",
-                "message": "Don't debug via git history. Read the actual code.",
-            }
-        )
-
-        result = classify_command(
-            command="git diff HEAD~1",
-            transcript_path="/tmp/transcript.jsonl",
-            llm_provider=mock_llm,
-            debug=lambda x: None,
-        )
-        assert result.is_blocked is True
 
     def test_llm_blocks_obfuscated_command(self):
         """Test LLM blocks obfuscated/encoded commands."""
@@ -200,8 +150,8 @@ class TestClassifyCommand:
 class TestPreToolHookIntegration:
     """Integration tests for classifier in PreToolHook."""
 
-    def test_pre_tool_hook_uses_classifier_for_git_log(self, tmp_path):
-        """Test that PreToolHook delegates git log to classifier."""
+    def test_pre_tool_hook_blocks_git_log_via_regex(self, tmp_path):
+        """Test that PreToolHook blocks git log via regex patterns, not LLM."""
         from drinkingbird.hooks.pre_tool import PreToolHook
         from drinkingbird.config import PreToolHookConfig
 
@@ -209,15 +159,6 @@ class TestPreToolHookIntegration:
         hook = PreToolHook(config=config)
 
         mock_llm = Mock()
-        mock_llm.is_configured.return_value = True
-        mock_llm.call.return_value = Mock(
-            content={
-                "decision": "block",
-                "category": "git_history",
-                "reason": "Debugging via history",
-                "message": "Read the actual code.",
-            }
-        )
         hook.llm_provider = mock_llm
 
         result = hook.handle(
@@ -226,6 +167,8 @@ class TestPreToolHookIntegration:
         )
 
         assert result.decision.value == "block"
+        # LLM should NOT have been called - regex handles this
+        mock_llm.call.assert_not_called()
 
     def test_pre_tool_hook_uses_classifier_for_obfuscation(self, tmp_path):
         """Test that PreToolHook delegates obfuscated commands to classifier."""

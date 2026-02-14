@@ -11,11 +11,7 @@ if TYPE_CHECKING:
 
 # Patterns that trigger LLM classification
 NEEDS_LLM_PATTERNS = [
-    # Git history commands (intent-dependent)
-    r"git\s+log\b(?!.*--oneline\s+-\d+$)",
-    r"git\s+show\s+HEAD~",
-    r"git\s+diff\s+HEAD~",
-    r"git\s+blame\b",
+    # NOTE: git history commands handled by hard regex block in patterns.py
     # Destructive commands (need scope/intent judgment)
     # Note: catastrophic patterns like rm -rf / are caught by patterns.py
     r"rm\s+-rf?\s+",  # rm -r or rm -rf with any path
@@ -33,10 +29,7 @@ NEEDS_LLM_PATTERNS = [
 
 # Commands that are always safe (skip LLM)
 ALWAYS_ALLOWED_PATTERNS = [
-    r"git\s+log\s+--oneline\s+-\d+$",
-    r"git\s+status\b",
-    r"git\s+diff\b(?!.*HEAD~)",
-    r"git\s+show\s+HEAD\b(?!~)",
+    # NOTE: git commands handled by patterns.py (hard regex block/allow)
     # Common safe cleanup targets (avoid LLM for obvious cases)
     r"rm\s+-rf?\s+(node_modules|dist|build|\.cache|__pycache__|\.pytest_cache|coverage|\.next|\.nuxt|target|vendor)/?\s*$",
     r"rm\s+-rf?\s+\./?(node_modules|dist|build|\.cache|__pycache__|\.pytest_cache|coverage|\.next|\.nuxt|target|vendor)/?\s*$",
@@ -50,24 +43,7 @@ When uncertain, BLOCK. False positives are acceptable; false negatives are not.
 
 ## Categories
 
-### 1. Git History Debugging (category: "git_history")
-Philosophy: Agents learn by fixing forward, not debugging backward.
-
-ALLOW - Learning and context:
-- Viewing recent commits for commit message style matching
-- Reading PR descriptions or commit messages for context
-- Understanding how a feature was originally implemented
-
-BLOCK - Using history as a debugging crutch:
-- Comparing HEAD~N to find what changed or broke
-- Using git diff/show with HEAD~ to debug a current failure
-- Bisecting to find when a bug was introduced
-- Any command where conversation mentions: bug, broke, broken, failing, error, fix, debug, regression
-
-Example BLOCK: Agent sees test failure, runs `git show HEAD~3` to see "what changed"
-Example ALLOW: Agent runs `git log --oneline -5` to match commit message style
-
-### 2. Destructive Commands (category: "destructive")
+### 1. Destructive Commands (category: "destructive")
 Development routinely involves cleanup. Judge by SCOPE and TARGET.
 
 ALLOW - Targeted cleanup with clear intent:
@@ -88,7 +64,7 @@ BLOCK - Dangerous scope or unclear target:
 Example ALLOW: Agent runs tests, sees stale cache issue, runs `rm -rf .pytest_cache/`
 Example BLOCK: Agent hits error, runs `rm -rf .` to "start fresh"
 
-### 3. Obfuscated Commands (category: "obfuscation")
+### 2. Obfuscated Commands (category: "obfuscation")
 BLOCK any command that hides its true intent:
 - Base64/hex decoding piped to execution
 - eval with encoded or constructed strings
@@ -96,18 +72,18 @@ BLOCK any command that hides its true intent:
 
 If you cannot immediately understand what a command does, BLOCK it.
 
-### 4. Remote Code Execution (category: "remote_execution")
+### 3. Remote Code Execution (category: "remote_execution")
 BLOCK: `curl ... | bash`, `wget ... | sh`, download-and-execute patterns
 ALLOW: Downloading scripts to files for inspection, fetching data from APIs
 
-### 5. Default Behavior
-If a command doesn't fit categories 1-4 but feels unsafe, BLOCK with category "other".
+### 4. Default Behavior
+If a command doesn't fit categories 1-3 but feels unsafe, BLOCK with category "other".
 If clearly safe and productive, ALLOW with category "none".
 
 ## Response Format
 {
   "decision": "allow" | "block",
-  "category": "git_history" | "destructive" | "obfuscation" | "remote_execution" | "other" | "none",
+  "category": "destructive" | "obfuscation" | "remote_execution" | "other" | "none",
   "reason": "one sentence explanation",
   "message": "message to agent if blocking (be specific about what to do instead)"
 }"""
@@ -121,7 +97,7 @@ RESPONSE_SCHEMA = {
         },
         "category": {
             "type": "string",
-            "enum": ["git_history", "destructive", "obfuscation", "remote_execution", "other", "none"],
+            "enum": ["destructive", "obfuscation", "remote_execution", "other", "none"],
         },
         "reason": {"type": "string"},
         "message": {"type": "string"},
