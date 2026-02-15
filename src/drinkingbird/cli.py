@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -92,19 +93,12 @@ def install(agent: str, use_global: bool, dry_run: bool) -> None:
 
     if dry_run:
         click.echo(f"Would install hooks for {agent} ({scope})")
-        click.echo(f"Config path: {config_path}")
-        click.echo(f"Install config:")
-        click.echo(json.dumps(adapter.get_install_config(), indent=2))
         return
 
     try:
         success = adapter.install(Path(bdb_path), scope=scope, workspace=workspace)
         if success:
             click.echo(f"Installed hooks for {agent} ({scope})")
-            click.echo(f"Config updated: {config_path}")
-            click.echo()
-            click.echo(f"BDB config: {bdb_config_path}")
-            click.echo("Edit this file to add your API key if not already configured.")
 
             # Update manifest
             manifest = Manifest.load()
@@ -165,7 +159,7 @@ def uninstall(
         if dry_run:
             click.echo("Would uninstall:")
             for inst in installations:
-                click.echo(f"  - {inst.agent} ({inst.scope}): {inst.path}")
+                click.echo(f"  - {inst.agent} ({inst.scope})")
             return
 
         for inst in installations:
@@ -179,10 +173,10 @@ def uninstall(
             try:
                 success = adapter.uninstall(scope=inst.scope, workspace=workspace)
                 if success:
-                    click.echo(f"Uninstalled {inst.agent} ({inst.scope}): {inst.path}")
+                    click.echo(f"Uninstalled {inst.agent} ({inst.scope})")
                     manifest.remove(agent=inst.agent, scope=inst.scope, path=inst.path)
                 else:
-                    click.echo(f"No hooks found for {inst.agent} at {inst.path}")
+                    click.echo(f"No hooks found for {inst.agent} ({inst.scope})")
                     # Still remove from manifest if file doesn't exist
                     manifest.remove(agent=inst.agent, scope=inst.scope, path=inst.path)
             except Exception as e:
@@ -210,14 +204,12 @@ def uninstall(
 
     if dry_run:
         click.echo(f"Would uninstall hooks for {agent} ({scope})")
-        click.echo(f"Config path: {config_path}")
         return
 
     try:
         success = adapter.uninstall(scope=scope, workspace=workspace)
         if success:
             click.echo(f"Uninstalled hooks for {agent} ({scope})")
-            click.echo(f"Config updated: {config_path}")
 
             # Update manifest
             manifest.remove(agent=agent, scope=scope, path=str(config_path))
@@ -285,67 +277,49 @@ def agents() -> None:
 def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
     """Show BDB status and health.
 
-    Displays configuration, installations, and any detected issues.
-
-    \b
-    By default, shows only the current workspace:
-    - Local installations if in a git repository
-    - Global installations otherwise
-
-    Use --global to see all installations.
-    Use --fix to automatically repair detected issues.
-    Use --test-connection to verify LLM API connectivity.
+    Displays a concise summary of configuration, installations, and issues.
+    Use --global to see all installations, --fix to repair issues,
+    or --test-connection to verify LLM API connectivity.
     """
     from drinkingbird.doctor import diagnose_global, diagnose_local, fix_issues
-    from drinkingbird.manifest import Installation, Manifest
+    from drinkingbird.manifest import Manifest
 
-    click.echo("BDB Status")
-    click.echo("=" * 40)
+    ensure_config()
 
-    # Show pause status first
-    paused, sentinel_path = is_paused()
-    if paused:
-        click.secho("⏸  PAUSED", fg="yellow", bold=True)
-        if sentinel_path:
-            click.echo(f"   {sentinel_path}")
-        click.echo()
+    # Build summary line: version | mode | config | LLM | pause
+    parts = [f"bdb v{__version__}"]
 
-    # Config section
-    click.echo("Config")
-    click.echo("-" * 40)
-    config_path = ensure_config()
-    click.echo(f"  File: {config_path}")
+    current_mode, _mode_source = get_mode_info()
+    parts.append(current_mode.value)
 
+    config = None
     try:
         config = load_config()
-        click.secho("  Syntax: OK", fg="green")
-    except ConfigError as e:
-        click.secho(f"  Syntax: FAILED - {e}", fg="red")
-        config = None
+        config_ok = True
+    except ConfigError:
+        config_ok = False
+
+    if not config_ok:
+        parts.append(click.style("config: FAIL", fg="red"))
+    elif (CONFIG_PATH.stat().st_mode & 0o077) != 0:
+        parts.append(click.style("config: perms!", fg="yellow"))
 
     if config:
-        # Check permissions
-        mode = CONFIG_PATH.stat().st_mode
-        if (mode & 0o077) != 0:
-            click.secho("  Permissions: WARNING - readable by others", fg="yellow")
-        else:
-            click.echo("  Permissions: OK (600)")
-
-        # Show API key status
         api_key = config.llm.get_api_key()
         if api_key:
-            masked = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
-            click.echo(f"  API key: {masked}")
-            click.echo(f"  Provider: {config.llm.provider}")
-            click.echo(f"  Model: {config.llm.model}")
+            parts.append(click.style("llm: ok", fg="green"))
         else:
-            click.secho("  API key: NOT CONFIGURED", fg="yellow")
-            click.echo("  (Hooks will allow all actions without supervision)")
+            parts.append(click.style("llm: none", fg="yellow"))
 
-        # Test LLM connectivity if requested
-        if test_connection and api_key:
-            click.echo()
-            click.echo("Testing LLM connection...")
+    paused, _sentinel_path = is_paused()
+    if paused:
+        parts.append(click.style("PAUSED", fg="yellow", bold=True))
+
+    click.echo(" | ".join(parts))
+
+    # Test LLM connectivity if requested
+    if test_connection:
+        if config and config.llm.get_api_key():
             from drinkingbird.supervisor import get_llm_provider
 
             provider = get_llm_provider(config)
@@ -362,19 +336,15 @@ def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
                         },
                     )
                     if response.success:
-                        click.secho("  Connection: OK", fg="green")
+                        click.secho("  connection: ok", fg="green")
                     else:
-                        click.secho(f"  Connection: FAILED - {response.content}", fg="red")
-                except Exception as e:
-                    click.secho(f"  Connection: FAILED - {e}", fg="red")
-        elif test_connection and not api_key:
-            click.secho("  Cannot test connection: no API key configured", fg="yellow")
+                        click.secho("  connection: FAIL", fg="red")
+                except Exception:
+                    click.secho("  connection: FAIL", fg="red")
+        else:
+            click.secho("  connection: no api key", fg="yellow")
 
-    # Installations section
-    click.echo()
-    click.echo("Installations")
-    click.echo("-" * 40)
-
+    # Installations
     manifest = Manifest.load()
     workspace = get_workspace_root()
 
@@ -385,14 +355,6 @@ def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
         active_scope = "global"
         active_path = None
 
-    def is_active(inst: Installation) -> bool:
-        """Check if installation is active for current directory."""
-        if inst.scope != active_scope:
-            return False
-        if active_scope == "local" and active_path:
-            return active_path in inst.path
-        return active_scope == "global"
-
     if use_global:
         installations = manifest.get()
     else:
@@ -400,72 +362,41 @@ def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
         if active_scope == "local" and active_path:
             installations = [i for i in installations if active_path in i.path]
 
-    # Clean up missing installations and group by agent
-    by_agent: dict[str, list] = {}
-    removed_count = 0
+    # Clean stale entries silently
+    live = []
+    dirty = False
     for inst in installations:
         if not Path(inst.path).exists():
             manifest.remove(path=inst.path)
-            removed_count += 1
-            continue
-        if inst.agent not in by_agent:
-            by_agent[inst.agent] = []
-        by_agent[inst.agent].append(inst)
-
-    if removed_count > 0:
+            dirty = True
+        else:
+            live.append(inst)
+    if dirty:
         manifest.save()
-        click.secho(f"  Cleaned up {removed_count} stale installation(s)", fg="yellow")
 
-    if not by_agent:
-        click.echo("  No installations found.")
-        click.echo()
-        click.echo("  To install hooks, run:")
-        click.echo("    bdb install claude-code")
+    if not live:
+        click.echo("No agents installed. Run: bdb install <agent>")
     else:
-        for agent in sorted(by_agent.keys()):
-            for inst in by_agent[agent]:
-                date_str = inst.installed_at[:10] if inst.installed_at else "unknown"
-                line = f"  ✓ {agent} ({inst.scope}): {inst.path}"
+        agents_str = ", ".join(
+            f"{inst.agent} ({inst.scope})" for inst in live
+        )
+        click.echo(f"Agents: {agents_str}")
 
-                if use_global and is_active(inst):
-                    click.secho(line, fg="cyan")
-                else:
-                    click.echo(line)
-                click.echo(f"      installed: {date_str}")
-
-        total = sum(len(insts) for insts in by_agent.values())
-        click.echo()
-        click.echo(f"  Total: {total} installation(s)")
-
-    # Health check section
-    click.echo()
-    click.echo("Health")
-    click.echo("-" * 40)
-
+    # Health
     if use_global:
         issues = diagnose_global()
     else:
-        if workspace:
-            issues = diagnose_local(workspace)
-        else:
-            issues = diagnose_global()
+        issues = diagnose_local(workspace) if workspace else diagnose_global()
 
-    if not issues:
-        click.secho("  No issues found.", fg="green")
-    else:
-        click.echo(f"  Found {len(issues)} issue(s):")
+    if issues:
         for issue in issues:
-            click.echo(f"    {issue}")
-
+            click.secho(f"  ! {issue}", fg="red")
         if do_fix:
-            click.echo()
-            click.echo("  Applying fixes...")
             fixes = fix_issues(issues)
             for fix in fixes:
-                click.secho(f"    ✓ {fix}", fg="green")
+                click.secho(f"  ✓ {fix}", fg="green")
         else:
-            click.echo()
-            click.echo("  Run 'bdb status --fix' to repair these issues.")
+            click.echo("  Run 'bdb status --fix' to repair.")
 
 
 
@@ -647,9 +578,9 @@ def config() -> None:
 
 @config.command("show")
 def config_show() -> None:
-    """Show current configuration."""
-    config_path = ensure_config()
-    click.echo(config_path.read_text())
+    """Show current configuration (secrets redacted)."""
+    content = ensure_config().read_text()
+    click.echo(re.sub(r"((?:api_key|secret_key|secret|password|token)\s*:\s*)\S+", r"\1***", content))
 
 
 @config.command("template")
@@ -700,13 +631,12 @@ def logs(tail: bool, errors: bool, lines: int) -> None:
 
     if not log_path.exists():
         log_type = "error" if errors else "supervisor"
-        click.echo(f"No {log_type} log found at {log_path}")
-        click.echo("Logs are created when BDB hooks are triggered.")
+        click.echo(f"No {log_type} log found. Logs are created when hooks are triggered.")
         return
 
     if tail:
         # Use tail -f for following
-        click.echo(f"Following {log_path} (Ctrl+C to stop)")
+        click.echo("Following log (Ctrl+C to stop)")
         try:
             subprocess.run(["tail", "-f", str(log_path)], check=True)
         except KeyboardInterrupt:
@@ -754,7 +684,7 @@ def pause(use_global: bool, reason: str | None) -> None:
             location = "global"
 
     create_sentinel(sentinel, reason)
-    click.echo(f"BDB paused ({location}): {sentinel}")
+    click.echo(f"BDB paused ({location})")
     if reason:
         click.echo(f"Reason: {reason}")
 
@@ -779,7 +709,7 @@ def resume(use_global: bool) -> None:
         sentinel = Path(path)
 
     if remove_sentinel(sentinel):
-        click.echo(f"BDB resumed: removed {sentinel}")
+        click.echo("BDB resumed.")
     else:
         click.echo("BDB is not paused.")
 
@@ -805,12 +735,12 @@ def mode_cmd(new_mode: str | None, use_global: bool, do_clear: bool) -> None:
       bdb mode --clear          # Clear local mode file
     """
     if do_clear:
+        scope = "global" if use_global else "local"
         path = clear_mode(use_global=use_global)
         if path:
-            click.echo(f"Cleared mode: {path}")
+            click.echo(f"Mode cleared ({scope})")
         else:
-            scope = "global" if use_global else "local"
-            click.echo(f"No {scope} mode file to clear.")
+            click.echo(f"No {scope} mode to clear.")
         return
 
     if new_mode is None:
@@ -818,16 +748,18 @@ def mode_cmd(new_mode: str | None, use_global: bool, do_clear: bool) -> None:
         current_mode, source = get_mode_info()
         click.echo(f"Mode: {current_mode.value}")
         if source:
-            click.echo(f"Source: {source}")
+            scope = "global" if "/.bdb/" in str(source) else "local"
+            click.echo(f"Source: {scope}")
         else:
-            click.echo("Source: default (no mode file)")
+            click.echo("Source: default")
         return
 
     # Set mode
     try:
         mode_enum = Mode(new_mode)
-        path = set_mode(mode_enum, use_global=use_global)
-        click.echo(f"Mode set to {new_mode}: {path}")
+        set_mode(mode_enum, use_global=use_global)
+        scope = "global" if use_global else "local"
+        click.echo(f"Mode set to {new_mode} ({scope})")
     except ValueError as e:
         click.echo(str(e), err=True)
         sys.exit(1)

@@ -22,16 +22,51 @@ class TestCheckCommand:
         ("git reset --hard HEAD~1", True),
         ("git clean -f", True),
         ("git checkout .", True),
+        ("git co .", True),
         ("git restore .", True),
         ("git push --force", True),
         ("git push -f origin main", True),
         ("git branch -D feature", True),
 
-        # Branch switching - should block
+        # Branch switching - should block (ALL branch switches corrupt worktrees)
         ("git checkout main", True),
         ("git checkout master", True),
-        ("git switch main", True),
+        ("git checkout develop", True),
+        ("git checkout feature/other-branch", True),
+        ("git checkout some-branch", True),
         ("git checkout origin/main", True),
+        ("git checkout origin/feature/foo", True),
+        ("git checkout -b new-branch", True),
+        ("git checkout -B new-branch", True),
+        ("git checkout -", True),
+        ("git switch main", True),
+        ("git switch feature/other-branch", True),
+        ("git switch -", True),
+        ("git switch --detach HEAD", True),
+
+        # Git aliases - must also be blocked
+        ("git co main", True),
+        ("git co master", True),
+        ("git co feature/other-branch", True),
+        ("git co origin/main", True),
+        ("git co -b new-branch", True),
+        ("git co -", True),
+        ("git sw main", True),
+        ("git sw feature/other-branch", True),
+        ("git sw -", True),
+
+        # Checkout files from another ref with -- . (destroys worktree)
+        ("git checkout main -- .", True),
+        ("git co main -- .", True),
+        ("git checkout origin/main -- .", True),
+        ("git co origin/main -- .", True),
+
+        # Branch creation via switch -c/-C is allowed (safe in worktrees)
+        ("git switch -c new-branch", False),
+        ("git switch -C new-branch", False),
+        ("git switch --create new-branch", False),
+        ("git sw -c new-branch", False),
+        ("git sw -C new-branch", False),
 
         # Interactive git - should block
         ("git rebase -i HEAD~3", True),
@@ -58,6 +93,20 @@ class TestCheckCommand:
         ("git status", False),
         ("git diff", False),
         ("git log --oneline -5", False),
+        ("git log --oneline HEAD..origin/main", False),
+        ("git log --oneline main..HEAD", False),
+
+        # File restore with -- is allowed (not a branch switch)
+        ("git checkout -- file.py", False),
+        ("git checkout --ours file.py", False),
+        ("git checkout --theirs file.py", False),
+        ("git co -- file.py", False),
+        ("git co --ours file.py", False),
+        ("git co --theirs file.py", False),
+        # Single file restore from ref with -- is allowed
+        ("git checkout HEAD -- file.py", False),
+        ("git co HEAD -- file.py", False),
+        ("git checkout origin/main -- crates/foo.rs", False),
 
         # Normal commands
         ("ls -la", False),

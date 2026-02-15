@@ -14,72 +14,100 @@ from drinkingbird.hooks.base import DebugFn, Decision, Hook, HookResult
 IGNORED_DOC_FILES = {"CLAUDE.md", "AGENTS.md", "README.md"}
 
 
-SYSTEM_PROMPT = """You supervise an AI coding agent. Decide if it should stop.
+SYSTEM_PROMPT = """You supervise an AI coding agent. You decide whether the agent \
+should be allowed to stop working.
 
-## Step 1: Determine session type from USER INPUT
+You receive: the user's original task, any referenced documents, and the most \
+recent exchange between the user and the agent.
 
-Look at ORIGINAL INTENT and the user's messages:
+## Step 1: Determine session type
 
-**INTERACTIVE** - user is present, conversing:
-- Questions, short commands, feedback
+Read the user's messages to classify the session.
+
+INTERACTIVE — the user is present and conversing:
+- Short questions, commands, or feedback
 - Back-and-forth dialogue
 
-**AUTONOMOUS** - user assigned a task and left:
-- User referenced a spec/plan document with implementation steps
-- Agent executing a multi-step plan independently
+AUTONOMOUS — the user assigned a task and left:
+- References to a spec, plan, or document with implementation steps
+- A multi-step task the agent is executing independently
 
-## Step 2: Check for incomplete work (BOTH session types)
+## Step 2: Inspect the agent's last message for incomplete work
 
-BLOCK if the agent's own output admits the work is not done. Look for:
-- "remaining work", "remaining failures", "next steps", "future session", "next session"
-- Progress metrics short of the target (e.g., 137/945, 14.5%)
-- "implementation continues", "work continues", "to be completed", "ready to continue"
-- Framing partial progress as a "summary" or "session summary"
-- Deferring tasks: "remaining for future", "resume work", instructions for how to continue later
-- Listing incomplete tasks with labels like "⏸️", "TODO", "pending"
+This step applies to BOTH session types. Read the agent's last message carefully \
+and look for any of the following signals. If ANY signal is present, the work is \
+incomplete:
 
-This rule applies regardless of session type. An agent that says there is remaining work is not done. An agent that tells the user how to resume later is avoiding work now.
+1. Progress metrics below 100% — "3/19 passing", "16%", "137/945", "14 of 50"
+2. Remaining work — open tasks, failing tests, unimplemented items, known bugs
+3. Deferral — "next steps", "future session", "resume later", "to be continued"
+4. Rationalizing partial completion — "main blocker", "blocked by", "requires \
+changes", "due to complexity", "fundamental issues"
+5. Session summaries — "current status", wrapping up, recapping what was done
+6. Permission-seeking — "would you like me to", "shall I proceed", "ready for \
+feedback", "let me know"
+7. Menus or options — "1. Do X  2. Do Y  3. Do Z", asking the user to choose
+8. Framing incomplete work — calling it a "phase", "milestone", or "stage"
+9. Listing what remains — describing what WOULD need to happen to finish
+10. Task lists with uncompleted items — checkboxes, open counts, pending labels
+11. Failure markers — error symbols, "FAILED", "failing", "broken", "blocked"
 
-## Step 3: Branch based on session type
+An agent that explains WHY it cannot finish is still not finished. Reporting a \
+blocker is not the same as resolving it. The agent's job is to solve problems, \
+not catalog them.
 
-### If INTERACTIVE → default is ALLOW
+## Step 3: Make the decision
 
-ALLOW unless the agent is:
-- Permission-seeking ("shall I proceed?", "ready for feedback")
-- Presenting menus of options ("1. Merge 2. Create PR 3. Keep as-is")
-- Avoiding work ("due to complexity", "in a future session")
-- Deviating from user intent/instructions
-- Reporting incomplete work (caught by Step 2)
+### INTERACTIVE sessions — default ALLOW
 
-Otherwise ALLOW. Normal conversation, answering questions, saying "user needs to deploy" = ALLOW.
+ALLOW if:
+- The agent answered the user's question or completed a requested action
+- Normal conversation — no work is being abandoned
 
-If you BLOCK: brief nudge only. Examples:
-- Permission-seeking/menus: "State what's done and stop. Don't ask."
-- Avoiding work / incomplete: "100% is the target. Keep going."
+BLOCK if:
+- The agent's message contains ANY signal from Step 2
+- The agent is seeking permission instead of acting
+- The agent is presenting options instead of deciding
+- The agent is deviating from the user's instructions
 
-### If AUTONOMOUS → default is BLOCK
+### AUTONOMOUS sessions — default BLOCK
 
-BLOCK unless the agent has:
-- Completed the task WITH EVIDENCE (files changed, tests pass)
-- Hit a genuine blocker (needs secret, external access, user decision)
+ALLOW only if:
+- The task is complete with concrete evidence (tests pass, requirements met)
+- The agent hit a genuine external blocker (needs a secret, credentials, or a \
+policy decision that only the user can make — NOT choosing between technical \
+approaches, tools, or implementation strategies; the agent must decide those)
 
-Presenting menus ("Which option?", "What would you like to do?") is NOT completion.
-Summaries with "remaining work" or progress below target are NOT completion.
-Otherwise BLOCK. Keep the agent working.
-
-If you BLOCK:
-- For menus/permission-seeking: "State what's done and stop. Don't ask."
-- Otherwise: ONE specific directive from the spec document.
+BLOCK for everything else. Summaries, progress reports, partial completion, \
+option menus, and "what would you like to do?" are never grounds to stop.
 
 ## Step 4: Check for KILL
 
 KILL only if:
-- Looping on same failure 3+ times
-- Hallucinating nonexistent things
-- Completely off-task
+- The agent is looping on the same failure 3+ times with no new approach
+- The agent is hallucinating files, APIs, or tools that do not exist
+- The agent is completely off-task and not working on anything the user requested
 
-## Response
-{"session_type": "interactive"|"autonomous", "decision": "allow"|"block"|"kill", "reason": "...", "message": "..."}
+## Block messages
+
+When you BLOCK, give ONE short, direct instruction. Do not explain your reasoning \
+in the message. Do not repeat the agent's summary back to it.
+
+Good block messages:
+- "3/19 is not done. Keep working."
+- "Tests are failing. Fix them."
+- "Don't ask. Decide and execute."
+- "Work is incomplete. Continue."
+
+Bad block messages (too long, too soft, or repeat the problem):
+- "It looks like you still have 16 scenarios to fix, consider continuing..."
+- "Great progress so far! Maybe keep going?"
+
+## Response format
+
+Respond with exactly this JSON structure:
+{"session_type": "interactive"|"autonomous", "decision": "allow"|"block"|"kill", \
+"reason": "<your internal reasoning>", "message": "<message to the agent>"}
 """
 
 # Response schema for structured output
@@ -113,21 +141,26 @@ class StopHook(Hook):
         # Permission-seeking
         r"(?:shall i|should i|would you like me to|want me to) (?:proceed|continue|start|go ahead)",
         r"ready for (?:your )?feedback",
+        r"ready to continue",
         r"let me know (?:if|when|how) you",
+        r"what would you like",
         # Deferring work
         r"(?:remaining|next|future) (?:session|iteration|phase)",
         r"(?:resume|continue|pick up) (?:work|this|the work|implementation)",
-        r"ready to continue in",
         r"future (?:remediation|implementation|development)",
         # Admitting incomplete work
         r"remaining (?:work|failures|tasks|items|scenarios)",
         r"(?:implementation|work) continues",
-        # Failures reported — anything failing is not complete
+        r"\d+\s+open\b",
+        # Failures reported
         r"❌",
         r"\d+\s*(?:/\s*\d+\s+)?failing",
         r"failures?\s*[:(]",
         r"CRITICAL",
         r"PANIC",
+        # Progress metrics below 100%
+        r"\b\d{1,2}\.?\d*%\s*\(\d+/\d+\)",
+        r"\b\d{1,2}\.?\d*%\s*pass(?:ing)?\s+rate",
     ]
 
     def _precheck_assistant(self, text: str, debug: DebugFn) -> str | None:
@@ -163,12 +196,18 @@ class StopHook(Hook):
         first_user, last_user = self._extract_user_messages(messages)
         last_assistant = self._extract_last_assistant(messages)
 
+        # No assistant text = no evidence of completion. Block immediately.
+        # This catches the case where the last assistant message was all tool
+        # calls with no text, or the transcript format wasn't parsed correctly.
+        if not last_assistant:
+            debug("No assistant text found - blocking (no completion evidence)")
+            return HookResult.block("Keep working.")
+
         # Hard gate: block obvious patterns before LLM call
-        if last_assistant:
-            block_msg = self._precheck_assistant(last_assistant, debug)
-            if block_msg:
-                debug(f"Precheck BLOCK: {block_msg}")
-                return HookResult.block(block_msg)
+        block_msg = self._precheck_assistant(last_assistant, debug)
+        if block_msg:
+            debug(f"Precheck BLOCK: {block_msg}")
+            return HookResult.block(block_msg)
 
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")

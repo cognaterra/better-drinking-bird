@@ -56,6 +56,8 @@ DEFAULT_CONFIG = {
         },
         "pre_compact": {
             "enabled": True,
+            "inject_git_context": True,
+            "quote_context_files": True,
             "context_patterns": [
                 "docs/plans/*.md",
                 "docs/*.md",
@@ -180,6 +182,8 @@ class PreCompactHookConfig:
     """Pre-compact hook configuration."""
 
     enabled: bool = True
+    inject_git_context: bool = True
+    quote_context_files: bool = True
     context_patterns: list[str] = field(default_factory=lambda: [
         "docs/plans/*.md",
         "docs/*.md",
@@ -426,6 +430,8 @@ hooks:
   # Pre-compact hook - preserves context during compression
   pre_compact:
     enabled: true
+    inject_git_context: true  # Inject branch name and worktree path before compaction
+    quote_context_files: true  # Include full content of CLAUDE.md/AGENTS.md (not just filenames)
     context_patterns:
       - "docs/plans/*.md"
       - "docs/*.md"
