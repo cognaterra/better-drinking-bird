@@ -189,19 +189,20 @@ class PreCompactHook(Hook):
         if not transcript_path:
             return None
 
-        # Read transcript and search for worktree names
-        try:
-            transcript_text = Path(transcript_path).read_text()
-        except OSError as e:
-            debug(f"Cannot read transcript for worktree matching: {e}")
+        # Extract tool_use input text from the transcript.
+        # Only inputs matter — tool outputs contain noise like
+        # `git worktree list` which mentions ALL worktrees.
+        tool_input_text = self._extract_tool_inputs(transcript_path, debug)
+        if not tool_input_text:
             return None
 
-        # Find which worktree name appears in the transcript
+        # Search for ".worktrees/<name>" with a path boundary after the name
+        # to avoid prefix collisions (e.g. "foo" matching "foo-fixes").
         matched_name: str | None = None
         for name in candidates:
-            if name in transcript_text:
+            pattern = r"\.worktrees/" + re.escape(name) + r'(?=[/"\s\'\\]|$)'
+            if re.search(pattern, tool_input_text):
                 if matched_name is not None:
-                    # Multiple matches — ambiguous, omit branch entirely
                     debug(f"Ambiguous worktree match: both {matched_name} and {name} found in transcript")
                     return {}
                 matched_name = name
@@ -242,6 +243,54 @@ class PreCompactHook(Hook):
         except OSError as e:
             debug(f"Cannot read gitdir for {wt_gitdir.name}: {e}")
             return None
+
+    def _extract_tool_inputs(
+        self, transcript_path: str, debug: DebugFn
+    ) -> str:
+        """Extract all tool_use input values from the transcript.
+
+        Returns a single string of concatenated tool input values.
+        Only tool inputs are included — tool results/outputs are excluded
+        because they contain noise (e.g. git worktree list dumps all paths).
+        """
+        parts: list[str] = []
+        try:
+            with open(transcript_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # Get the content list from the message
+                    content = None
+                    if msg.get("type") == "assistant":
+                        inner = msg.get("message", {})
+                        if isinstance(inner, dict):
+                            content = inner.get("content")
+                    elif msg.get("role") == "assistant":
+                        content = msg.get("content")
+
+                    if not isinstance(content, list):
+                        continue
+
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") != "tool_use":
+                            continue
+                        inp = block.get("input", {})
+                        if isinstance(inp, dict):
+                            for v in inp.values():
+                                if isinstance(v, str):
+                                    parts.append(v)
+        except OSError as e:
+            debug(f"Cannot read transcript: {e}")
+
+        return "\n".join(parts)
 
     def _find_git_root(self, cwd: str) -> Path | None:
         """Walk up from cwd to find the directory containing .git."""

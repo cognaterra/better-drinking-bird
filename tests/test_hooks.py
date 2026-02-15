@@ -849,7 +849,9 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
-            wt_dir = os.path.join(tmpdir, "my-feature")
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+            wt_dir = os.path.join(wt_parent, "my-feature")
             os.makedirs(wt_dir)
             self._make_worktree(
                 wt_dir,
@@ -878,7 +880,9 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
-            wt_dir = os.path.join(tmpdir, "bugfix-auth")
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+            wt_dir = os.path.join(wt_parent, "bugfix-auth")
             os.makedirs(wt_dir)
             self._make_worktree(
                 wt_dir,
@@ -907,7 +911,9 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
-            wt_dir = os.path.join(tmpdir, "new-feature")
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+            wt_dir = os.path.join(wt_parent, "new-feature")
             os.makedirs(wt_dir)
             self._make_worktree(
                 wt_dir,
@@ -918,7 +924,7 @@ class TestPreCompactHookGitContext:
             transcript = self._make_transcript(tmpdir, [
                 {"role": "assistant", "content": [
                     {"type": "tool_use", "name": "Bash",
-                     "input": {"command": "git worktree add ../new-feature feature/new-thing"}},
+                     "input": {"command": f"git worktree add {wt_dir} feature/new-thing"}},
                 ]},
             ])
 
@@ -935,7 +941,9 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
-            wt_dir = os.path.join(tmpdir, "some-worktree")
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+            wt_dir = os.path.join(wt_parent, "some-worktree")
             os.makedirs(wt_dir)
             self._make_worktree(
                 wt_dir,
@@ -943,9 +951,12 @@ class TestPreCompactHookGitContext:
                 branch="feature/other",
             )
 
-            # Transcript mentions nothing about the worktree
+            # Transcript has tool inputs but none reference the worktree
             transcript = self._make_transcript(tmpdir, [
-                {"role": "user", "content": "fix the bug in main"},
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "name": "Bash",
+                     "input": {"command": "git status"}},
+                ]},
             ])
 
             result = self.hook._get_git_context(main_repo, transcript, self.debug)
@@ -961,18 +972,24 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+
             # Create two worktrees
-            wt1 = os.path.join(tmpdir, "wt-alpha")
+            wt1 = os.path.join(wt_parent, "wt-alpha")
             os.makedirs(wt1)
             self._make_worktree(wt1, os.path.join(main_repo, ".git"), branch="feature/a")
 
-            wt2 = os.path.join(tmpdir, "wt-beta")
+            wt2 = os.path.join(wt_parent, "wt-beta")
             os.makedirs(wt2)
             self._make_worktree(wt2, os.path.join(main_repo, ".git"), branch="feature/b")
 
-            # Transcript mentions both worktrees
+            # Transcript has tool inputs referencing both worktrees
             transcript = self._make_transcript(tmpdir, [
-                {"role": "user", "content": f"compare {wt1} and {wt2}"},
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "name": "Bash",
+                     "input": {"command": f"diff {wt1}/src/main.py {wt2}/src/main.py"}},
+                ]},
             ])
 
             result = self.hook._get_git_context(main_repo, transcript, self.debug)
@@ -989,7 +1006,9 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
-            wt_dir = os.path.join(tmpdir, "my-wt")
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+            wt_dir = os.path.join(wt_parent, "my-wt")
             os.makedirs(wt_dir)
             self._make_worktree(wt_dir, os.path.join(main_repo, ".git"), branch="feature/x")
 
@@ -1006,7 +1025,9 @@ class TestPreCompactHookGitContext:
             os.makedirs(main_repo)
             self._make_git_repo(main_repo, branch="main")
 
-            wt_dir = os.path.join(tmpdir, "impl-feature")
+            wt_parent = os.path.join(main_repo, ".worktrees")
+            os.makedirs(wt_parent)
+            wt_dir = os.path.join(wt_parent, "impl-feature")
             os.makedirs(wt_dir)
             self._make_worktree(
                 wt_dir,
