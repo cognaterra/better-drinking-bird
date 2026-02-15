@@ -55,7 +55,7 @@ Otherwise ALLOW. Normal conversation, answering questions, saying "user needs to
 
 If you BLOCK: brief nudge only. Examples:
 - Permission-seeking/menus: "State what's done and stop. Don't ask."
-- Avoiding work / incomplete: "Keep going."
+- Avoiding work / incomplete: "100% is the target. Keep going."
 
 ### If AUTONOMOUS → default is BLOCK
 
@@ -152,7 +152,7 @@ class StopHook(Hook):
         conversation_depth = getattr(self.config, "conversation_depth", 1)
 
         # Parse transcript
-        messages = self._parse_transcript(transcript_path)
+        messages = self._parse_transcript(transcript_path, debug)
         debug(f"Parsed {len(messages)} messages")
 
         if not messages:
@@ -183,7 +183,7 @@ class StopHook(Hook):
                     all_mentions.append(mention)
                     seen.add(mention)
 
-        files = self._read_mentioned_files(all_mentions, cwd)
+        files = self._read_mentioned_files(all_mentions, cwd, debug)
 
         # Build prompt
         user_prompt = self._build_user_prompt(
@@ -244,10 +244,13 @@ class StopHook(Hook):
             message = f"{message}\n\nReferenced documents: {refs}"
         return HookResult.block(message)
 
-    def _parse_transcript(self, transcript_path: str) -> list[dict]:
+    def _parse_transcript(
+        self, transcript_path: str, debug: DebugFn
+    ) -> list[dict]:
         """Parse JSONL transcript file into list of messages."""
         messages = []
         if not transcript_path:
+            debug("No transcript path provided")
             return messages
 
         try:
@@ -258,10 +261,13 @@ class StopHook(Hook):
                         try:
                             msg = json.loads(line)
                             messages.append(msg)
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
+                            debug(f"Failed to parse transcript line: {e}")
                             continue
         except FileNotFoundError:
-            pass
+            debug(f"Transcript file not found: {transcript_path}")
+        except PermissionError:
+            debug(f"Permission denied reading transcript: {transcript_path}")
 
         return messages
 
@@ -298,12 +304,6 @@ class StopHook(Hook):
                             text_parts.append(block)
                     content = "\n".join(text_parts)
                 user_messages.append(content)
-            # Legacy format
-            elif msg.get("type") == "human":
-                content = msg.get("message", "")
-                if isinstance(content, dict):
-                    content = content.get("content", "")
-                user_messages.append(str(content))
         return user_messages
 
     def _extract_user_messages(
@@ -365,11 +365,11 @@ class StopHook(Hook):
         return re.findall(pattern, text)
 
     def _read_mentioned_files(
-        self, mentions: list[str], cwd: str
+        self, mentions: list[str], cwd: str, debug: DebugFn
     ) -> dict[str, str]:
         """Read contents of mentioned files, resolving relative paths.
 
-        Only includes files that actually exist - skips invalid mentions.
+        Logs when files can't be found or read.
         """
         files = {}
         for mention in mentions:
@@ -378,15 +378,15 @@ class StopHook(Hook):
             else:
                 path = mention
 
-            # Only include files that exist
             if not os.path.isfile(path):
+                debug(f"Referenced file not found: {mention} (resolved: {path})")
                 continue
 
             try:
                 with open(path, "r") as f:
                     files[mention] = f.read()
-            except (PermissionError, IsADirectoryError):
-                # Skip files we can't read
+            except (PermissionError, IsADirectoryError) as e:
+                debug(f"Cannot read referenced file {mention}: {e}")
                 continue
         return files
 

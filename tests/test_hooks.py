@@ -205,18 +205,6 @@ class TestStopHook:
 
         assert result == ["First message", "Second message", "Third message"]
 
-    def test_extract_all_user_messages_human_format(self):
-        """Test extracting all user messages from human/type format."""
-        messages = [
-            {"type": "human", "message": "First message"},
-            {"type": "assistant", "message": "Response"},
-            {"type": "human", "message": "Second message"},
-        ]
-
-        result = self.hook._extract_all_user_messages(messages)
-
-        assert result == ["First message", "Second message"]
-
     def test_extract_all_user_messages_list_content(self):
         """Test extracting user messages with list content blocks."""
         messages = [
