@@ -434,6 +434,84 @@ class TestStopHook:
         finally:
             os.unlink(transcript_path)
 
+    def test_last_assistant_message_from_hook_input(self):
+        """Test that last_assistant_message from hook input triggers precheck.
+
+        Claude Code provides the assistant's final text directly in the hook
+        input as last_assistant_message. The hook should use this for the
+        precheck even when transcript parsing fails to extract assistant text.
+        """
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        # Transcript with no assistant text (tool_use only)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "execute the plan"},
+            }) + "\n")
+            f.write(json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "id": "1", "name": "Bash",
+                         "input": {"command": "cargo test"}},
+                    ],
+                },
+            }) + "\n")
+            transcript_path = f.name
+
+        try:
+            hook_input = {
+                "transcript_path": transcript_path,
+                "cwd": "/tmp",
+                "last_assistant_message": (
+                    "Ready for feedback. Phase 3 is complete. "
+                    "Next up is Phase 4."
+                ),
+            }
+
+            debug_messages = []
+            result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+            assert result.decision == Decision.BLOCK
+            # Blocked by precheck on direct message, LLM never called
+            mock_llm.call.assert_not_called()
+            debug_text = " ".join(debug_messages)
+            assert "precheck block" in debug_text.lower()
+        finally:
+            os.unlink(transcript_path)
+
+    def test_last_assistant_message_without_transcript(self):
+        """Test that last_assistant_message works even with empty transcript."""
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": "What would you like me to do next?",
+        }
+
+        debug_messages = []
+        result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+        assert result.decision == Decision.BLOCK
+        mock_llm.call.assert_not_called()
+
     def test_stop_hook_active_flag_ignored(self):
         """Test that stop_hook_active flag is ignored.
 

@@ -146,6 +146,7 @@ class StopHook(Hook):
         r"what would you like",
         # Deferring work
         r"(?:remaining|next|future) (?:session|iteration|phase)",
+        r"next up is",
         r"(?:resume|continue|pick up) (?:work|this|the work|implementation)",
         r"future (?:remediation|implementation|development)",
         # Admitting incomplete work
@@ -184,17 +185,35 @@ class StopHook(Hook):
         cwd = hook_input.get("cwd", os.getcwd())
         conversation_depth = getattr(self.config, "conversation_depth", 1)
 
+        # Claude Code provides last_assistant_message directly in hook input.
+        # Use it as the primary source — transcript parsing is the fallback.
+        direct_assistant_msg = hook_input.get("last_assistant_message", "")
+        if direct_assistant_msg:
+            debug(f"Got last_assistant_message from hook input ({len(direct_assistant_msg)} chars)")
+            # Fast path: precheck the direct message before parsing transcript
+            block_msg = self._precheck_assistant(direct_assistant_msg, debug)
+            if block_msg:
+                debug(f"Precheck BLOCK (direct message): {block_msg}")
+                return HookResult.block(block_msg)
+
         # Parse transcript
         messages = self._parse_transcript(transcript_path, debug)
         debug(f"Parsed {len(messages)} messages")
 
-        if not messages:
-            debug("No messages - blocking with default message")
+        if not messages and not direct_assistant_msg:
+            debug("No messages and no direct assistant message - blocking")
             return HookResult.block("Great work! Keep going.")
 
         # Extract relevant messages based on depth
         first_user, last_user = self._extract_user_messages(messages)
         last_assistant = self._extract_last_assistant(messages)
+
+        # Prefer direct hook input over transcript extraction
+        if direct_assistant_msg and (
+            not last_assistant or len(direct_assistant_msg) > len(last_assistant)
+        ):
+            debug("Using last_assistant_message from hook input (more complete)")
+            last_assistant = direct_assistant_msg
 
         # No assistant text = no evidence of completion. Block immediately.
         # This catches the case where the last assistant message was all tool
