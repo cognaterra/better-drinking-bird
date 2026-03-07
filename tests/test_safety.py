@@ -28,40 +28,40 @@ class TestCheckCommand:
         ("git push -f origin main", True),
         ("git branch -D feature", True),
 
-        # Branch switching - should block (ALL branch switches corrupt worktrees)
-        ("git checkout main", True),
-        ("git checkout master", True),
-        ("git checkout develop", True),
-        ("git checkout feature/other-branch", True),
-        ("git checkout some-branch", True),
-        ("git checkout origin/main", True),
-        ("git checkout origin/feature/foo", True),
-        ("git checkout -b new-branch", True),
-        ("git checkout -B new-branch", True),
-        ("git checkout -", True),
-        ("git switch main", True),
-        ("git switch feature/other-branch", True),
-        ("git switch -", True),
-        ("git switch --detach HEAD", True),
+        # Branch switching - now allowed (branch_switching category disabled)
+        ("git checkout main", False),
+        ("git checkout master", False),
+        ("git checkout develop", False),
+        ("git checkout feature/other-branch", False),
+        ("git checkout some-branch", False),
+        ("git checkout origin/main", False),
+        ("git checkout origin/feature/foo", False),
+        ("git checkout -b new-branch", False),
+        ("git checkout -B new-branch", False),
+        ("git checkout -", False),
+        ("git switch main", False),
+        ("git switch feature/other-branch", False),
+        ("git switch -", False),
+        ("git switch --detach HEAD", False),
 
-        # Git aliases - must also be blocked
-        ("git co main", True),
-        ("git co master", True),
-        ("git co feature/other-branch", True),
-        ("git co origin/main", True),
-        ("git co -b new-branch", True),
-        ("git co -", True),
-        ("git sw main", True),
-        ("git sw feature/other-branch", True),
-        ("git sw -", True),
+        # Git aliases - now allowed
+        ("git co main", False),
+        ("git co master", False),
+        ("git co feature/other-branch", False),
+        ("git co origin/main", False),
+        ("git co -b new-branch", False),
+        ("git co -", False),
+        ("git sw main", False),
+        ("git sw feature/other-branch", False),
+        ("git sw -", False),
 
-        # Checkout files from another ref with -- . (destroys worktree)
-        ("git checkout main -- .", True),
-        ("git co main -- .", True),
-        ("git checkout origin/main -- .", True),
-        ("git co origin/main -- .", True),
+        # Checkout files from another ref with -- . (now allowed)
+        ("git checkout main -- .", False),
+        ("git co main -- .", False),
+        ("git checkout origin/main -- .", False),
+        ("git co origin/main -- .", False),
 
-        # Branch creation via switch -c/-C is allowed (safe in worktrees)
+        # Branch creation via switch -c/-C is allowed
         ("git switch -c new-branch", False),
         ("git switch -C new-branch", False),
         ("git switch --create new-branch", False),
@@ -142,7 +142,6 @@ class TestCheckCommand:
         categories = {
             "ci_bypass": True,
             "destructive_git": False,
-            "branch_switching": False,
             "interactive_git": False,
             "dangerous_files": False,
             "git_history": False,
@@ -206,7 +205,6 @@ class TestSafetyCategories:
         expected = [
             "ci_bypass",
             "destructive_git",
-            "branch_switching",
             "interactive_git",
             "dangerous_files",
             "git_history",

@@ -120,6 +120,32 @@ class StopHook(Hook):
 
     event_name = "Stop"
 
+    # Regex patterns in ASSISTANT message that indicate hard external blockers.
+    # The agent literally cannot continue due to external factors.
+    # These trigger ALLOW because the agent is stuck, not avoiding work.
+    ASSISTANT_HARD_BLOCKER_PATTERNS = [
+        r"hit your limit.*resets",
+        r"rate limit",
+        r"quota exceeded",
+        r"too many requests",
+        r"service unavailable",
+        r"authentication failed",
+        r"access denied",
+        r"internal server error",
+        r"temporarily unavailable",
+    ]
+
+    # Regex patterns in USER message that explicitly confirm completion.
+    # Only the USER can declare work done - agent self-declarations don't count.
+    USER_COMPLETION_PATTERNS = [
+        # Explicit completion with strong modifiers
+        r"This (?:is|was) (?:OBVIOUSLY|CLEARLY|DEFINITELY|VALID) (?:(?:VALID )?COMPLETION|DONE|FINISHED)",
+        # Direct "don't block" instructions
+        r"(?:DO NOT|DON'T) (?:BLOCK|STOP)",
+        # User confirming after reviewing
+        r"(?:Looks?|Seems?) (?:good|complete|done|finished)",
+    ]
+
     # Regex patterns that always BLOCK regardless of LLM judgment.
     # These catch common work-avoidance patterns in the assistant's last message.
     PRECHECK_BLOCK_PATTERNS = [
@@ -162,6 +188,34 @@ class StopHook(Hook):
                 return "Keep going."
         return None
 
+    def _precheck_assistant_hard_blocker(self, text: str, debug: DebugFn) -> bool:
+        """Check if assistant hit a hard external blocker (rate limit, auth, etc).
+
+        Returns True if a hard blocker is detected, meaning we should ALLOW the stop.
+        The agent cannot continue due to external factors, not work avoidance.
+        """
+        if not text:
+            return False
+        for pattern in self.ASSISTANT_HARD_BLOCKER_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                debug(f"Hard blocker detected: {pattern}")
+                return True
+        return False
+
+    def _precheck_user_completion(self, text: str, debug: DebugFn) -> bool:
+        """Check if user has explicitly confirmed work is complete.
+
+        Returns True if user confirmation is detected, meaning we should ALLOW.
+        Only USER declarations count - agent self-declarations are work avoidance.
+        """
+        if not text:
+            return False
+        for pattern in self.USER_COMPLETION_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                debug(f"User completion confirmed: {pattern}")
+                return True
+        return False
+
     def handle(self, hook_input: dict[str, Any], debug: DebugFn) -> HookResult:
         """Handle stop hook event."""
         debug(f"Stop hook: LLM configured: {self.llm_provider is not None}")
@@ -173,41 +227,49 @@ class StopHook(Hook):
         # Claude Code provides last_assistant_message directly in hook input.
         # Use it as the primary source — transcript parsing is the fallback.
         direct_assistant_msg = hook_input.get("last_assistant_message", "")
-        if direct_assistant_msg:
-            debug(f"Got last_assistant_message from hook input ({len(direct_assistant_msg)} chars)")
-            # Fast path: precheck the direct message before parsing transcript
-            block_msg = self._precheck_assistant(direct_assistant_msg, debug)
-            if block_msg:
-                debug(f"Precheck BLOCK (direct message): {block_msg}")
-                return HookResult.block(block_msg)
 
-        # Parse transcript
+        # Parse transcript to get user messages
         messages = self._parse_transcript(transcript_path, debug)
         debug(f"Parsed {len(messages)} messages")
 
-        if not messages and not direct_assistant_msg:
-            debug("No messages and no direct assistant message - blocking")
-            return HookResult.block("Great work! Keep going.")
-
-        # Extract relevant messages based on depth
+        # Extract relevant messages
         first_user, last_user = self._extract_user_messages(messages)
         last_assistant = self._extract_last_assistant(messages)
 
-        # Prefer direct hook input over transcript extraction
+        # Prefer direct hook input over transcript extraction for assistant
         if direct_assistant_msg and (
             not last_assistant or len(direct_assistant_msg) > len(last_assistant)
         ):
-            debug("Using last_assistant_message from hook input (more complete)")
+            debug(f"Using last_assistant_message from hook input ({len(direct_assistant_msg)} chars)")
             last_assistant = direct_assistant_msg
 
-        # No assistant text = no evidence of completion. Block immediately.
-        # This catches the case where the last assistant message was all tool
-        # calls with no text, or the transcript format wasn't parsed correctly.
-        if not last_assistant:
-            debug("No assistant text found - blocking (no completion evidence)")
-            return HookResult.block("Keep working.")
+        # === ALLOW CHECKS (check these BEFORE block patterns) ===
 
-        # Hard gate: block obvious patterns before LLM call
+        # 1. Check for hard external blockers in assistant message
+        # (rate limits, auth errors) - agent literally cannot continue
+        if last_assistant and self._precheck_assistant_hard_blocker(last_assistant, debug):
+            debug("Hard blocker detected - allowing stop")
+            return HookResult.allow("External blocker detected (rate limit, auth, etc.)")
+
+        # 2. Check if user explicitly confirmed completion
+        # Only USER declarations count - agent self-declarations are work avoidance
+        if last_user and self._precheck_user_completion(last_user, debug):
+            debug("User confirmed completion - allowing stop")
+            return HookResult.allow("User confirmed work is complete")
+
+        # === BLOCK CHECKS ===
+
+        # No messages = nothing to evaluate, proceed to allow
+        if not messages and not direct_assistant_msg:
+            debug("No messages and no direct assistant message - allowing (no signals to block)")
+            return HookResult.allow("No messages to evaluate")
+
+        # No assistant text = no evidence of incomplete work signals, proceed
+        if not last_assistant:
+            debug("No assistant text found - allowing (no incomplete work signals)")
+            return HookResult.allow("No assistant text to evaluate")
+
+        # Hard gate: block obvious work-avoidance patterns
         block_msg = self._precheck_assistant(last_assistant, debug)
         if block_msg:
             debug(f"Precheck BLOCK: {block_msg}")
@@ -234,10 +296,11 @@ class StopHook(Hook):
         )
         debug(f"User prompt length: {len(user_prompt)}")
 
-        # Call LLM - if not configured, still BLOCK by default
+        # Call LLM - if not configured, default to ALLOW
+        # (Precheck patterns already caught obvious work-avoidance cases)
         if not self.llm_provider or not self.llm_provider.is_configured():
-            debug("No LLM configured - blocking with default message")
-            return HookResult.block("Great work! Keep going.")
+            debug("No LLM configured - allowing (precheck patterns handle obvious cases)")
+            return HookResult.allow("No LLM configured")
 
         debug("Calling LLM...")
         response = self.llm_provider.call(

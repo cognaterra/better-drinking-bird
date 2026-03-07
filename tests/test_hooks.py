@@ -79,7 +79,6 @@ class TestPreToolHook:
             categories={
                 "ci_bypass": True,
                 "destructive_git": True,
-                "branch_switching": True,
                 "interactive_git": True,
                 "dangerous_files": True,
                 "git_history": True,
@@ -131,15 +130,14 @@ class TestPreToolHook:
         assert result.decision == Decision.BLOCK
         assert "pre-commit" in result.message.lower() or "bypass" in result.message.lower()
 
-    def test_branch_switch_blocked(self):
-        """Test that branch switching is blocked."""
+    def test_branch_switch_allowed(self):
+        """Test that branch switching is allowed (branch_switching category removed)."""
         result = self.hook.handle(
             {"tool_name": "Bash", "tool_input": {"command": "git checkout main"}},
             self.debug,
         )
 
-        assert result.decision == Decision.BLOCK
-        assert "worktree" in result.message.lower() or "branch" in result.message.lower()
+        assert result.decision == Decision.ALLOW
 
     def test_disabled_category_allowed(self):
         """Test that disabled categories allow commands."""
@@ -382,11 +380,11 @@ class TestStopHook:
         assert "Check @file1.py" in result[0]
         assert "and @file2.py" in result[0]
 
-    def test_no_assistant_text_blocks(self):
-        """Test that stop is blocked when no assistant text can be extracted.
+    def test_no_assistant_text_allows(self):
+        """Test that stop is allowed when no assistant text can be extracted.
 
         When the last assistant message is all tool_use blocks with no text,
-        extracted text is empty. No text = no evidence of completion = BLOCK.
+        extracted text is empty. No text = no evidence of incomplete work = ALLOW.
         """
         from unittest.mock import Mock
         from drinkingbird.config import StopHookConfig
@@ -426,11 +424,11 @@ class TestStopHook:
             debug_messages = []
             result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
 
-            assert result.decision == Decision.BLOCK
-            # LLM should NOT have been called — blocked before reaching it
+            assert result.decision == Decision.ALLOW
+            # LLM should NOT have been called — allowed before reaching it
             mock_llm.call.assert_not_called()
             debug_text = " ".join(debug_messages)
-            assert "no completion evidence" in debug_text.lower()
+            assert "no incomplete work signals" in debug_text.lower()
         finally:
             os.unlink(transcript_path)
 
@@ -543,13 +541,163 @@ class TestStopHook:
         result = hook.handle(hook_input, debug)
 
         # The hook should NOT bypass evaluation due to the flag
-        # Default behavior is BLOCK - keep the agent working
-        assert result.decision == Decision.BLOCK
-        assert "Great work! Keep going." in result.reason
+        # With no LLM configured and no messages, default is ALLOW
+        assert result.decision == Decision.ALLOW
 
         # Verify the flag was NOT checked (no "stop_hook_active=true" in debug)
         debug_text = " ".join(debug_messages)
         assert "stop_hook_active" not in debug_text.lower()
+
+    def test_hard_blocker_rate_limit_allows_stop(self):
+        """Test that rate limit errors allow stop - agent cannot continue.
+
+        When the assistant message contains a rate limit error, the agent
+        literally cannot continue. We should ALLOW the stop.
+        """
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": (
+                "I've completed the review. All tests pass.\n\n"
+                "You've hit your limit · resets 8pm (America/Phoenix)"
+            ),
+        }
+
+        debug_messages = []
+        result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+        assert result.decision == Decision.ALLOW
+        mock_llm.call.assert_not_called()
+        debug_text = " ".join(debug_messages)
+        assert "hard blocker" in debug_text.lower()
+
+    def test_user_completion_confirmation_allows_stop(self):
+        """Test that user explicitly confirming completion allows stop.
+
+        Only USER declarations count - the agent cannot self-declare completion.
+        """
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        # Create transcript with user confirming completion
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "This is OBVIOUSLY VALID COMPLETION"},
+            }) + "\n")
+            f.write(json.dumps({
+                "type": "assistant",
+                "message": {"role": "assistant", "content": "Summary of completed work..."},
+            }) + "\n")
+            transcript_path = f.name
+
+        try:
+            hook_input = {
+                "transcript_path": transcript_path,
+                "cwd": "/tmp",
+            }
+
+            debug_messages = []
+            result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+            assert result.decision == Decision.ALLOW
+            mock_llm.call.assert_not_called()
+            debug_text = " ".join(debug_messages)
+            assert "user confirmed" in debug_text.lower()
+        finally:
+            os.unlink(transcript_path)
+
+    def test_agent_self_declaration_still_blocks(self):
+        """Test that agent claiming completion without user confirmation still blocks.
+
+        The agent cannot self-declare completion. Only user confirmation allows stop.
+        """
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        # Create transcript where agent claims completion but user doesn't confirm
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "Do the task"},
+            }) + "\n")
+            f.write(json.dumps({
+                "type": "assistant",
+                "message": {"role": "assistant", "content": "Work is complete!"},
+            }) + "\n")
+            transcript_path = f.name
+
+        try:
+            hook_input = {
+                "transcript_path": transcript_path,
+                "cwd": "/tmp",
+            }
+
+            debug_messages = []
+            result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+            # Should NOT allow - agent self-declaration doesn't count
+            # It should proceed to LLM or block based on other signals
+            assert result.decision == Decision.BLOCK or mock_llm.call.called
+        finally:
+            os.unlink(transcript_path)
+
+    def test_do_not_block_instruction_allows_stop(self):
+        """Test that 'DO NOT BLOCK' instruction from user allows stop."""
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "DO NOT BLOCK this is done"},
+            }) + "\n")
+            f.write(json.dumps({
+                "type": "assistant",
+                "message": {"role": "assistant", "content": "Here's the summary..."},
+            }) + "\n")
+            transcript_path = f.name
+
+        try:
+            hook_input = {
+                "transcript_path": transcript_path,
+                "cwd": "/tmp",
+            }
+
+            debug_messages = []
+            result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+            assert result.decision == Decision.ALLOW
+            mock_llm.call.assert_not_called()
+        finally:
+            os.unlink(transcript_path)
 
 
 class TestPreCompactHookGitContext:

@@ -36,7 +36,6 @@ hooks:
     categories:
       ci_bypass: true        # --no-verify, HUSKY=0
       destructive_git: true  # reset --hard, clean -f, push --force
-      branch_switching: true # checkout main (protects worktrees)
       interactive_git: true  # rebase -i, add -p
       dangerous_files: true  # rm -rf /
       git_history: true      # verbose git log, git blame

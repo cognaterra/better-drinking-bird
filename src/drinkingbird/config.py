@@ -43,7 +43,6 @@ DEFAULT_CONFIG = {
             "categories": {
                 "ci_bypass": True,
                 "destructive_git": True,
-                "branch_switching": True,
                 "interactive_git": True,
                 "dangerous_files": True,
                 "git_history": True,
@@ -161,7 +160,6 @@ class PreToolHookConfig:
     categories: dict[str, bool] = field(default_factory=lambda: {
         "ci_bypass": True,
         "destructive_git": True,
-        "branch_switching": True,
         "interactive_git": True,
         "dangerous_files": True,
         "git_history": True,
@@ -416,7 +414,6 @@ hooks:
     categories:
       ci_bypass: true        # --no-verify, HUSKY=0
       destructive_git: true  # reset --hard, clean -f, push --force
-      branch_switching: true # checkout main (protects worktrees)
       interactive_git: true  # rebase -i, add -p
       dangerous_files: true  # rm -rf /
       git_history: true      # verbose git log, git blame

@@ -80,7 +80,6 @@ hooks:
     categories:
       ci_bypass: true        # --no-verify, HUSKY=0
       destructive_git: true  # reset --hard, push --force
-      branch_switching: true # checkout main (worktree protection)
       dangerous_files: true  # rm -rf /
 
   tool_failure:

@@ -15,11 +15,6 @@ class SafetyPattern:
     category: str
 
 
-# Common git aliases that must be caught.
-# git checkout -> co, git switch -> sw
-_CO = r"(?:checkout|co)"
-_SW = r"(?:switch|sw)"
-
 # Organized by category for easy enable/disable
 SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
     "ci_bypass": [
@@ -71,7 +66,7 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
             "destructive_git",
         ),
         SafetyPattern(
-            rf"git\s+{_CO}\s+\.",
+            r"git\s+(?:checkout|co)\s+\.",
             "NO. git checkout . discards changes. Ask the user.",
             "destructive_git",
         ),
@@ -94,41 +89,6 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
             r"git\s+branch\s+-D",
             "NO. git branch -D force-deletes branches. Use -d instead.",
             "destructive_git",
-        ),
-    ],
-    "branch_switching": [
-        # Block git switch/sw to existing branches.
-        # Allow -c / -C / --create (new branch creation is safe).
-        SafetyPattern(
-            rf"git\s+{_SW}\s+(?!-[cC]\b)(?!--create\b)\S",
-            "ABSOLUTELY NOT. Switching branches corrupts worktrees. "
-            "Stay on your assigned branch. Use `git switch -C <name>` to create a new branch.",
-            "branch_switching",
-        ),
-        # Block ALL git checkout/co to a ref.
-        # Safe cases (checkout <ref> -- <file>) are handled via ALLOWED_PATTERNS.
-        SafetyPattern(
-            rf"git\s+{_CO}\s+(?!--)[\w\-/]",
-            "ABSOLUTELY NOT. Switching branches corrupts worktrees. "
-            "Stay on your assigned branch. Use `git switch -C <name>` to create a new branch.",
-            "branch_switching",
-        ),
-        # Block git checkout/co <ref> -- . (checks out ALL files from another ref)
-        SafetyPattern(
-            rf"git\s+{_CO}\s+\S+\s+--\s+\.",
-            "ABSOLUTELY NOT. Checking out all files from another ref destroys the worktree. "
-            "Stay on your assigned branch.",
-            "branch_switching",
-        ),
-        SafetyPattern(
-            r"git\s+push\s+\S+\s+(main|master)\b",
-            "Do not push directly to main/master. Use a pull request.",
-            "branch_switching",
-        ),
-        SafetyPattern(
-            r"git\s+push\s+\S+\s+\S+:(main|master)\b",
-            "Do not push directly to main/master. Use a pull request.",
-            "branch_switching",
         ),
     ],
     "interactive_git": [
@@ -211,8 +171,6 @@ ALLOWED_PATTERNS = [
     r"git\s+diff\b(?!.*HEAD~)",  # Diffing is fine, except HEAD~ comparisons
     r"git\s+status\b",  # Status is always fine
     r"git\s+log\s+--oneline\b",  # Brief history is fine (commit style, range checks, etc.)
-    # File restore from a ref: git checkout <ref> -- <file> (but NOT -- . which is mass checkout)
-    rf"git\s+(?:checkout|co)\s+\S+\s+--\s+(?!\.(?:\s|$))\S",
 ]
 
 
