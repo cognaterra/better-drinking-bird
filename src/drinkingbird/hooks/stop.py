@@ -54,6 +54,19 @@ technical decisions, not escalate them.
 If ANY signal is found: BLOCK immediately. Do not consider session type. Do not \
 rationalize why the signal might be acceptable. The signal IS the decision.
 
+**Exception — Verified completion evidence**: The signals above are OVERRIDDEN \
+if the agent provides ALL of the following:
+- 100% completion metrics where both numbers match (e.g., "146/146 PASS", \
+"32/32 operations", NOT "3/19" or "51%")
+- Concrete verification output (test results with counts, build passing, \
+commit hashes)
+- Zero failures, zero remaining items, zero placeholders
+
+In this case, skip to Step 2. A completion report backed by verified evidence \
+is not a "session summary" or "permission-seeking" — it is proof of task \
+completion. The purpose of Step 1 signals is to catch agents that AVOID work, \
+not agents that PROVE they finished it.
+
 An agent that explains WHY it cannot finish is still not finished. An agent that \
 says "Phase N complete, next is Phase N+1" has finished a fraction, not the task. \
 An agent that presents a menu of options is avoiding work, not completing it.
@@ -176,6 +189,31 @@ class StopHook(Hook):
         r"(?:Looks?|Seems?) (?:good|complete|done|finished)",
     ]
 
+    # Patterns indicating verified completion (100% metrics, all passing).
+    # When these are present WITHOUT negation, precheck block patterns are skipped
+    # and the LLM evaluates whether this is genuine completion.
+    COMPLETION_EVIDENCE_PATTERNS = [
+        # N/N where both numbers match (e.g., "146/146", "32/32")
+        r"(\d+)/\1\b",
+        # Explicit all-pass with count
+        r"\b\d{2,}\s+tests?\s+PASS",
+        r"\ball\s+\d+\s+(?:tests?|assertions?|scenarios?)\s+(?:pass|PASS)",
+    ]
+
+    # Patterns that negate completion evidence (failures still present).
+    # These must not trigger on zero-count reports like "0 failures".
+    COMPLETION_NEGATION_PATTERNS = [
+        r"❌",
+        r"\bFAILED\b",
+        r"\bFAILING\b",
+        r"[1-9]\d*\s+failures?",  # N failures where N > 0
+        r"\bbroken\b",
+        r"remaining (?:work|tasks|items)",
+        r"placeholder (?:implementation|code|stub|logic|handler)s?",
+        r"\bTODO\b",
+        r"not (?:yet |fully )?(?:implemented|complete|done|working)",
+    ]
+
     # Regex patterns that always BLOCK regardless of LLM judgment.
     # These catch common work-avoidance patterns in the assistant's last message.
     PRECHECK_BLOCK_PATTERNS = [
@@ -208,6 +246,35 @@ class StopHook(Hook):
         r"\b\d{1,2}\.?\d*%\s*\(\d+/\d+\)",
         r"\b\d{1,2}\.?\d*%\s*pass(?:ing)?\s+rate",
     ]
+
+    def _has_completion_evidence(self, text: str, debug: DebugFn) -> bool:
+        """Check if text contains strong completion evidence (100% metrics, all passing).
+
+        When True, precheck block patterns are skipped to let the LLM evaluate
+        whether this is genuine completion vs. gaming.
+        """
+        if not text:
+            return False
+
+        # Must have at least one completion evidence pattern
+        has_evidence = False
+        for pattern in self.COMPLETION_EVIDENCE_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                has_evidence = True
+                debug(f"Completion evidence found: {pattern}")
+                break
+
+        if not has_evidence:
+            return False
+
+        # Must NOT have negation patterns (failures still present)
+        for pattern in self.COMPLETION_NEGATION_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                debug(f"Completion evidence negated by: {pattern}")
+                return False
+
+        debug("Strong completion evidence detected - skipping precheck block patterns")
+        return True
 
     def _precheck_assistant(self, text: str, debug: DebugFn) -> str | None:
         """Check assistant text against hard-coded block patterns.
@@ -304,10 +371,14 @@ class StopHook(Hook):
             return HookResult.allow("No assistant text to evaluate")
 
         # Hard gate: block obvious work-avoidance patterns
-        block_msg = self._precheck_assistant(last_assistant, debug)
-        if block_msg:
-            debug(f"Precheck BLOCK: {block_msg}")
-            return HookResult.block(block_msg)
+        # Skip if strong completion evidence (100% metrics, no failures) is present —
+        # let the LLM evaluate whether the completion is genuine.
+        has_completion_evidence = self._has_completion_evidence(last_assistant, debug)
+        if not has_completion_evidence:
+            block_msg = self._precheck_assistant(last_assistant, debug)
+            if block_msg:
+                debug(f"Precheck BLOCK: {block_msg}")
+                return HookResult.block(block_msg)
 
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")
