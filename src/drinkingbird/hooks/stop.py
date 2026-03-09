@@ -17,34 +17,46 @@ IGNORED_DOC_FILES = {"CLAUDE.md", "AGENTS.md", "README.md"}
 SYSTEM_PROMPT = """You supervise an AI coding agent. You decide whether the agent \
 should be allowed to stop working.
 
-You receive: the user's original task, any referenced documents, and the most \
-recent exchange between the user and the agent.
+You receive: the user's original task, any referenced documents (the plan/spec \
+the agent is executing), and the most recent exchange between the user and the \
+agent.
 
 ## Step 1: Check for incomplete-work signals (MANDATORY FIRST)
 
 Read the agent's last message and check for ANY of these signals. If even ONE \
 is present, BLOCK. No exceptions. Do not proceed to Step 2.
 
-1. Progress metrics below 100% — "3/19 passing", "16%", "137/945", "14 of 50"
-2. Remaining work — open tasks, failing tests, unimplemented items, known bugs
-3. Deferral — "next steps", "future session", "resume later", "next up is"
-4. Rationalizing partial completion — "main blocker", "blocked by", "requires \
-changes", "due to complexity", "fundamental issues"
-5. Session summaries — "current status", wrapping up, recapping what was done
+1. Progress metrics below 100% — "3/19 passing", "16%", "51.6% complete", \
+"16 of 31", "137/945"
+2. Remaining work — open tasks, failing tests, unimplemented items, known bugs, \
+placeholder implementations, items "ready to be wired in"
+3. Deferral — "next steps would be", "future session", "resume later", \
+"next up is", describing what WOULD need to happen to finish
+4. Rationalizing partial completion — "significant progress", "solid foundation", \
+"progressing well", "main blocker", "blocked by", "due to complexity"
+5. Session summaries — "current status", wrapping up, recapping what was done, \
+listing commits or work completed so far
 6. Permission-seeking — "would you like me to", "shall I proceed", "ready for \
-feedback", "let me know", "how would you like"
-7. Menus or options — "1. Do X  2. Do Y  3. Do Z", asking the user to choose
+feedback", "let me know", "how would you like", "which direction", \
+"which path should I take"
+7. Menus or options — numbered lists of choices ("Three paths forward: 1... \
+2... 3..."), asking the user to choose a direction
 8. Phased framing — calling work a "phase", "milestone", or "stage", or saying \
 one phase is "complete" while more phases remain
-9. Listing what remains — describing what WOULD need to happen to finish
-10. Task lists with uncompleted items — checkboxes, open counts, pending labels
-11. Failure markers — error symbols, "FAILED", "failing", "broken", "blocked"
+9. Task lists with uncompleted items — checkboxes, open counts, pending labels
+10. Failure markers — error symbols, "FAILED", "failing", "broken", "blocked"
+11. Escalation theater — framing a technical decision as requiring user/team \
+input when the agent should decide itself. Examples: "I cannot responsibly \
+proceed without...", "this requires team lead input", presenting solvable \
+technical problems as organizational blockers. The agent's job is to make \
+technical decisions, not escalate them.
 
 If ANY signal is found: BLOCK immediately. Do not consider session type. Do not \
 rationalize why the signal might be acceptable. The signal IS the decision.
 
 An agent that explains WHY it cannot finish is still not finished. An agent that \
-says "Phase N complete, next is Phase N+1" has finished a fraction, not the task.
+says "Phase N complete, next is Phase N+1" has finished a fraction, not the task. \
+An agent that presents a menu of options is avoiding work, not completing it.
 
 ## Step 2: Determine session type (ONLY if zero signals found in Step 1)
 
@@ -82,11 +94,29 @@ KILL only if:
 
 ## Block messages
 
-When you BLOCK, give ONE short, direct instruction. Do not explain your reasoning \
-in the message. Do not repeat the agent's summary back to it.
+When you BLOCK, write a directive message that tells the agent exactly what to \
+do. Use the referenced documents to inform your directive.
 
-Good: "Work is incomplete. Continue." / "Don't ask. Decide and execute."
-Bad: "It looks like you still have 16 scenarios..." / "Great progress so far!"
+Your block message should:
+- Tell the agent to continue working on the plan
+- Reference specific parts of the plan/spec if available
+- Direct it to complete remaining items, not ask about them
+- If the agent presented options, CHOOSE for it (pick the option that continues \
+the plan)
+- If the agent escalated a technical decision, MAKE the decision for it
+
+Good block messages:
+- "Work is 51% complete. Continue implementing the remaining 15 operations."
+- "Don't ask. Decide and execute. Continue with Tier 1 completion."
+- "This is a technical decision, not a blocker. Fix the missing module and \
+continue."
+- "Placeholder implementations are not done. Replace them with real \
+implementations per the plan."
+
+Bad block messages:
+- "It looks like you still have 16 scenarios..." (repeating the agent's summary)
+- "Great progress so far!" (praising partial work)
+- "Keep going." (too vague when you have the plan)
 
 ## Response format
 
@@ -164,6 +194,10 @@ class StopHook(Hook):
         r"remaining (?:work|failures|tasks|items|scenarios)",
         r"(?:implementation|work) continues",
         r"\d+\s+open\b",
+        r"placeholder (?:implementation|code|stub|logic|handler)s?",
+        # Rationalizing partial completion
+        r"(?:significant|solid|good|great|substantial) (?:progress|foundation|start)",
+        r"progressing (?:well|nicely|smoothly)",
         # Failures reported
         r"❌",
         r"\d+\s*(?:/\s*\d+\s+)?failing",
