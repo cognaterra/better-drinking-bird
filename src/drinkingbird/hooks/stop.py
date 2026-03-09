@@ -100,29 +100,17 @@ KILL only if:
 
 ## Block messages
 
-When you BLOCK, write a directive message that tells the agent exactly what to \
-do. Use the referenced documents to inform your directive.
+When you BLOCK, write ONE short directive sentence — the single most important \
+next step. Do NOT list multiple steps, do NOT repeat the plan, do NOT write \
+paragraphs. The agent has the plan; it needs a nudge, not a lecture.
 
-Your block message should:
-- Tell the agent to continue working on the plan
-- Reference specific parts of the plan/spec if available
-- Direct it to complete remaining items, not ask about them
-- If the agent presented options, CHOOSE for it (pick the option that continues \
-the plan)
-- If the agent escalated a technical decision, MAKE the decision for it
+Good: "Continue implementing the remaining 15 Tier 1 operations per the plan."
+Good: "Don't ask — decide and execute. Continue with Tier 1 completion."
+Good: "Replace stub implementations with real ones per the plan."
 
-Good block messages:
-- "Work is 51% complete. Continue implementing the remaining 15 operations."
-- "Don't ask. Decide and execute. Continue with Tier 1 completion."
-- "This is a technical decision, not a blocker. Fix the missing module and \
-continue."
-- "Placeholder implementations are not done. Replace them with real \
-implementations per the plan."
-
-Bad block messages:
-- "It looks like you still have 16 scenarios..." (repeating the agent's summary)
-- "Great progress so far!" (praising partial work)
-- "Keep going." (too vague when you have the plan)
+Bad: Numbered lists of steps (the agent has the plan already)
+Bad: "Great progress so far!" (praising partial work)
+Bad: "Keep going." (too vague when you have the plan)
 
 ## Response format
 

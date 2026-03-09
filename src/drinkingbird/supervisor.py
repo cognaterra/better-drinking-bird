@@ -33,14 +33,27 @@ from drinkingbird.llm.openai import OpenAIProvider
 from drinkingbird.tracing import Tracer
 
 
+def _resolve_api_key_env(llm_config: Any) -> str | None:
+    """Determine the env var name for lazy API key resolution."""
+    if llm_config.api_key_env:
+        return llm_config.api_key_env
+    env_vars = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "azure": "AZURE_OPENAI_API_KEY",
+    }
+    return env_vars.get(llm_config.provider)
+
+
 def get_llm_provider(config: Config) -> LLMProvider | None:
     """Create LLM provider from config."""
     llm_config = config.llm
     api_key = llm_config.get_api_key()
+    api_key_env = _resolve_api_key_env(llm_config)
 
     # Azure OpenAI needs special handling for deployment/api_version
     if llm_config.provider == "azure":
-        return AzureOpenAIProvider(
+        provider = AzureOpenAIProvider(
             api_key=api_key,
             model=llm_config.model,
             base_url=llm_config.base_url,
@@ -48,6 +61,8 @@ def get_llm_provider(config: Config) -> LLMProvider | None:
             deployment=llm_config.deployment,
             api_version=llm_config.api_version,
         )
+        provider._api_key_env = api_key_env
+        return provider
 
     providers = {
         "openai": OpenAIProvider,
@@ -59,12 +74,14 @@ def get_llm_provider(config: Config) -> LLMProvider | None:
     if not provider_class:
         return None
 
-    return provider_class(
+    provider = provider_class(
         api_key=api_key,
         model=llm_config.model,
         base_url=llm_config.base_url,
         timeout=llm_config.timeout,
     )
+    provider._api_key_env = api_key_env
+    return provider
 
 
 def get_hook(

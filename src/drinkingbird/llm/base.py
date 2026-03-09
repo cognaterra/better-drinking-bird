@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -61,6 +62,7 @@ class LLMProvider(ABC):
         self.model = model
         self.base_url = base_url
         self.timeout = timeout
+        self._api_key_env: str | None = None
 
     @abstractmethod
     def call(
@@ -82,5 +84,17 @@ class LLMProvider(ABC):
         pass
 
     def is_configured(self) -> bool:
-        """Check if the provider is properly configured."""
-        return self.api_key is not None
+        """Check if the provider is properly configured.
+
+        Re-checks the env var on every call in case the key wasn't
+        available at init time (e.g. worktree subprocess that didn't
+        source .zshrc when the Supervisor was created).
+        """
+        if self.api_key:
+            return True
+        if self._api_key_env:
+            key = os.environ.get(self._api_key_env)
+            if key:
+                self.api_key = key
+                return True
+        return False

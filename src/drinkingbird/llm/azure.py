@@ -49,6 +49,12 @@ class AzureOpenAIProvider(LLMProvider):
 
     def is_configured(self) -> bool:
         """Check if the provider is properly configured."""
+        # Re-resolve API key from env var if missing (lazy check)
+        if not self.api_key and self._api_key_env:
+            import os
+            key = os.environ.get(self._api_key_env)
+            if key:
+                self.api_key = key
         return bool(self.api_key and self.base_url and self.deployment)
 
     def call(
