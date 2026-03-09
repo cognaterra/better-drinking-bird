@@ -433,17 +433,27 @@ class TestStopHook:
             os.unlink(transcript_path)
 
     def test_last_assistant_message_from_hook_input(self):
-        """Test that last_assistant_message from hook input triggers precheck.
+        """Test that last_assistant_message from hook input reaches the LLM.
 
         Claude Code provides the assistant's final text directly in the hook
-        input as last_assistant_message. The hook should use this for the
-        precheck even when transcript parsing fails to extract assistant text.
+        input as last_assistant_message. The hook should use this for LLM
+        evaluation even when transcript parsing fails to extract assistant text.
         """
         from unittest.mock import Mock
         from drinkingbird.config import StopHookConfig
 
         mock_llm = Mock()
         mock_llm.is_configured.return_value = True
+        mock_llm.call.return_value = Mock(
+            content={
+                "session_type": "autonomous",
+                "decision": "block",
+                "reason": "Phase 3 complete but Phase 4 remains",
+                "message": "Continue with Phase 4.",
+            },
+            model="gpt-4o-mini",
+            usage=None,
+        )
 
         config = StopHookConfig()
         hook = StopHook(config=config, llm_provider=mock_llm)
@@ -480,10 +490,8 @@ class TestStopHook:
             result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
 
             assert result.decision == Decision.BLOCK
-            # Blocked by precheck on direct message, LLM never called
-            mock_llm.call.assert_not_called()
-            debug_text = " ".join(debug_messages)
-            assert "precheck block" in debug_text.lower()
+            # LLM was called to evaluate (not precheck-blocked)
+            mock_llm.call.assert_called_once()
         finally:
             os.unlink(transcript_path)
 
@@ -494,6 +502,16 @@ class TestStopHook:
 
         mock_llm = Mock()
         mock_llm.is_configured.return_value = True
+        mock_llm.call.return_value = Mock(
+            content={
+                "session_type": "autonomous",
+                "decision": "block",
+                "reason": "Agent asking what to do instead of working",
+                "message": "Don't ask. Continue with the plan.",
+            },
+            model="gpt-4o-mini",
+            usage=None,
+        )
 
         config = StopHookConfig()
         hook = StopHook(config=config, llm_provider=mock_llm)
@@ -508,7 +526,8 @@ class TestStopHook:
         result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
 
         assert result.decision == Decision.BLOCK
-        mock_llm.call.assert_not_called()
+        # LLM evaluates — no precheck bypass
+        mock_llm.call.assert_called_once()
 
     def test_stop_hook_active_flag_ignored(self):
         """Test that stop_hook_active flag is ignored.
@@ -632,6 +651,17 @@ class TestStopHook:
 
         mock_llm = Mock()
         mock_llm.is_configured.return_value = True
+        mock_llm.call.return_value = Mock(
+            content={
+                "signals_found": [],
+                "session_type": "autonomous",
+                "decision": "block",
+                "reason": "Agent self-declaration without evidence",
+                "message": "Keep going.",
+            },
+            model="test-model",
+            usage=None,
+        )
 
         config = StopHookConfig()
         hook = StopHook(config=config, llm_provider=mock_llm)
@@ -698,6 +728,326 @@ class TestStopHook:
             mock_llm.call.assert_not_called()
         finally:
             os.unlink(transcript_path)
+
+
+class TestStopHookCompletionNegation:
+    """Tests for completion evidence negation in StopHook.
+
+    Only unambiguous failure signals (FAILED, ❌, N failures) negate
+    completion evidence. Semantic interpretation is the LLM's job.
+    """
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.hook = StopHook(config=None)
+        self.debug_messages = []
+
+    def debug(self, msg):
+        self.debug_messages.append(msg)
+
+    def test_failed_negates_completion_evidence(self):
+        """Explicit FAILED marker negates completion evidence."""
+        text = "151/151 scenarios run\n3 FAILED"
+        assert not self.hook._has_completion_evidence(text, self.debug)
+
+    def test_failure_count_negates_completion_evidence(self):
+        """N failures (N > 0) negates completion evidence."""
+        text = "146/146 tests run\n2 failures"
+        assert not self.hook._has_completion_evidence(text, self.debug)
+
+    def test_error_emoji_negates_completion_evidence(self):
+        """❌ negates completion evidence."""
+        text = "36/36 operations\n❌ Build failed"
+        assert not self.hook._has_completion_evidence(text, self.debug)
+
+    def test_genuine_completion_not_negated(self):
+        """Genuine 100% completion with no failure signals passes."""
+        text = (
+            "All 146/146 tests PASS\n"
+            "Build successful, 0 failures\n"
+            "Committed as abc1234\n"
+        )
+        assert self.hook._has_completion_evidence(text, self.debug)
+
+    def test_genuine_completion_with_tier2_followups_not_negated(self):
+        """Completion with out-of-scope follow-ups should NOT be negated.
+
+        Regression: 'Not implemented (Tier 2 feature)' was incorrectly
+        matching a negation pattern and blocking genuine completion.
+        """
+        text = (
+            "36/36 Tier 1 operations available\n"
+            "151/151 PASSED (100%)\n"
+            "cargo check: PASSED\n"
+            "Known Follow-ups\n"
+            "1. Rosetta Type Mappings - Not implemented (Tier 2 feature)\n"
+            "2. Porting Features - Not implemented (Tier 2 feature)\n"
+        )
+        assert self.hook._has_completion_evidence(text, self.debug)
+
+    def test_permission_seeking_goes_to_llm(self):
+        """Permission-seeking patterns are evaluated by LLM, not precheck.
+
+        Patterns like 'Which option would you prefer?' require semantic
+        context — the LLM determines if this is work avoidance or legitimate.
+        """
+        text = (
+            "There are two options:\n\n"
+            "Which option would you prefer?"
+        )
+        # No precheck block — goes to LLM
+        result = self.hook._precheck_assistant(text, self.debug)
+        assert result is None
+
+    def test_perl_stub_report_goes_to_llm(self):
+        """Perl stub report should reach the LLM for semantic evaluation.
+
+        Semantically ambiguous signals like 'Remaining Work', 'Next Session',
+        and stub descriptions are NOT precheck-blocked — the LLM evaluates
+        them in context.
+        """
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+        # LLM should block this — it's the LLM's job to interpret
+        mock_llm.call.return_value = Mock(
+            content={
+                "session_type": "autonomous",
+                "decision": "block",
+                "reason": "Stub implementations are not completion",
+                "message": "Replace stubs with real implementations.",
+            },
+            model="gpt-4o-mini",
+            usage=None,
+        )
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        report = (
+            "Final Status Report - Perl Language Review Session\n\n"
+            "Phase 1 (Simple Refactorings): 100% Framework Complete (10/10 operations)\n"
+            "1. add_my_declaration - Fully implemented + working\n"
+            "2. convert_unless_to_if - Implemented\n"
+            "3. remove_redundant_parens - Stub (ready for expansion)\n"
+            "4. add_parens_for_precedence - Stub (ready for expansion)\n\n"
+            "Remaining Perl Tier 1 Work (20 operations)\n\n"
+            "Recommendations for Next Session\n"
+            "1. Complete Type Definitions\n"
+            "2. Expand Phase 1 Implementations\n\n"
+            "Progress: From 3/105 operations (2.9%) to 15/105 operations (14.3%)\n"
+            "Estimated completion: ~20-30 hours\n"
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        debug_messages = []
+        result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+        assert result.decision == Decision.BLOCK
+
+
+class TestStopHookStrongCompletionAllow:
+    """Tests for strong completion evidence that should ALLOW without LLM.
+
+    When completion evidence (N/N metrics, no failures) is paired with
+    structural completion markers (ALL STEPS COMPLETED, FULLY COMPLETE),
+    the hook should ALLOW directly without LLM evaluation.
+    """
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        # LLM that would BLOCK if called — proving we bypass it
+        self.mock_llm = Mock()
+        self.mock_llm.is_configured.return_value = True
+        self.mock_llm.call.return_value = Mock(
+            content={
+                "session_type": "autonomous",
+                "decision": "block",
+                "reason": "Session summary detected",
+                "message": "Continue working.",
+            },
+            model="gpt-4o-mini",
+            usage=None,
+        )
+
+        config = StopHookConfig()
+        self.hook = StopHook(config=config, llm_provider=self.mock_llm)
+        self.debug_messages = []
+
+    def debug(self, msg):
+        self.debug_messages.append(msg)
+
+    def test_all_steps_completed_with_metrics_allows(self):
+        """Exact scenario: agent completed all work, committed, pushed, PR created.
+
+        This is the real-world case that was incorrectly blocked.
+        """
+        report = (
+            "✅ ALL STEPS COMPLETED\n\n"
+            "1. ✅ Code committed and pushed\n"
+            "  - Commits: 2 commits (de4a5a36, 93998f56)\n"
+            "  - Pushed: Branch pushed to origin\n\n"
+            "2. ✅ Tracking document updated\n"
+            "  - Ops: 34 → 36\n\n"
+            "3. ✅ origin main fetched and merged\n\n"
+            "4. ✅ Pull Request created\n"
+            "  PR #206: feat(scala): Complete Tier 1 operations wiring "
+            "(36/36 operations)\n\n"
+            "Final Status: Scala Language Module Review ✅ FULLY COMPLETE\n\n"
+            "All checklist items satisfied, all proof checks provided, "
+            "code committed, pushed, and PR created for review."
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        result = self.hook.handle(hook_input, self.debug)
+
+        assert result.decision == Decision.ALLOW, (
+            f"Expected ALLOW for clearly completed work, got {result.decision}. "
+            f"Debug: {self.debug_messages}"
+        )
+        # LLM should NOT have been called
+        self.mock_llm.call.assert_not_called()
+
+    def test_fully_complete_with_nn_metrics_allows(self):
+        """N/N metrics + FULLY COMPLETE should ALLOW directly."""
+        report = (
+            "All 146/146 tests PASS\n"
+            "Build successful\n"
+            "Committed as abc1234\n"
+            "PR created: #42\n\n"
+            "Status: FULLY COMPLETE"
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        result = self.hook.handle(hook_input, self.debug)
+
+        assert result.decision == Decision.ALLOW
+        self.mock_llm.call.assert_not_called()
+
+    def test_completion_metrics_without_structural_markers_goes_to_llm(self):
+        """N/N metrics alone (no structural markers) should still go to LLM.
+
+        This prevents gaming — just saying "36/36" without clear structural
+        completion shouldn't bypass LLM evaluation.
+        """
+        report = (
+            "36/36 operations wired.\n"
+            "Here's what we did today and what's next."
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        result = self.hook.handle(hook_input, self.debug)
+
+        # Should reach LLM (which blocks in our mock)
+        self.mock_llm.call.assert_called_once()
+
+    def test_structural_markers_with_failures_does_not_allow(self):
+        """ALL STEPS COMPLETED but with failures should NOT precheck allow."""
+        report = (
+            "✅ ALL STEPS COMPLETED\n"
+            "36/36 operations\n"
+            "❌ 2 tests FAILED\n"
+            "FULLY COMPLETE"
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        result = self.hook.handle(hook_input, self.debug)
+
+        # Completion evidence is negated by ❌/FAILED, so precheck blocks
+        # should fire (or LLM called). Either way, should NOT be ALLOW.
+        assert result.decision != Decision.ALLOW or self.mock_llm.call.called
+
+
+class TestStopHookSignalsFoundSchema:
+    """Tests that RESPONSE_SCHEMA forces signal enumeration via signals_found.
+
+    The LLM must enumerate all detected signals BEFORE making a decision.
+    This prevents the LLM from vibing its way to "allow" without checking.
+    """
+
+    def test_response_schema_includes_signals_found(self):
+        """RESPONSE_SCHEMA must include signals_found as a required array field."""
+        from drinkingbird.hooks.stop import RESPONSE_SCHEMA
+
+        assert "signals_found" in RESPONSE_SCHEMA["properties"]
+        signals_prop = RESPONSE_SCHEMA["properties"]["signals_found"]
+        assert signals_prop["type"] == "array"
+        assert signals_prop["items"]["type"] == "string"
+        assert "signals_found" in RESPONSE_SCHEMA["required"]
+
+    def test_system_prompt_requires_signal_enumeration(self):
+        """SYSTEM_PROMPT must instruct the LLM to list signals before deciding."""
+        from drinkingbird.hooks.stop import SYSTEM_PROMPT
+
+        # The prompt must mention signals_found and require enumeration
+        assert "signals_found" in SYSTEM_PROMPT
+        # The prompt must make clear: list signals FIRST, then decide
+        assert "List every signal" in SYSTEM_PROMPT or "list every signal" in SYSTEM_PROMPT or "enumerate" in SYSTEM_PROMPT.lower()
+
+    def test_signals_found_logged_in_debug(self):
+        """When LLM returns signals_found, they should be explicitly logged."""
+        from unittest.mock import Mock
+        from drinkingbird.config import StopHookConfig
+
+        mock_llm = Mock()
+        mock_llm.is_configured.return_value = True
+        mock_llm.call.return_value = Mock(
+            content={
+                "signals_found": ["sub-100% metrics: 83/105", "stubs present", "next session mentioned"],
+                "session_type": "autonomous",
+                "decision": "block",
+                "reason": "Work incomplete",
+                "message": "Continue implementing.",
+            },
+            model="test-model",
+            usage=None,
+        )
+
+        config = StopHookConfig()
+        hook = StopHook(config=config, llm_provider=mock_llm)
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": "Progress: 83/105 operations. Next session: complete remaining.",
+        }
+
+        debug_messages = []
+        hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+
+        debug_text = "\n".join(debug_messages)
+        # Must explicitly log signals count, not just dump the response dict
+        assert "Signals found: 3" in debug_text
 
 
 class TestPreCompactHookGitContext:

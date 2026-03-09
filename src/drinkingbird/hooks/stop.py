@@ -21,10 +21,12 @@ You receive: the user's original task, any referenced documents (the plan/spec \
 the agent is executing), and the most recent exchange between the user and the \
 agent.
 
-## Step 1: Check for incomplete-work signals (MANDATORY FIRST)
+## Step 1: Scan for incomplete-work signals (MANDATORY)
 
-Read the agent's last message and check for ANY of these signals. If even ONE \
-is present, BLOCK. No exceptions. Do not proceed to Step 2.
+Read the agent's last message line by line. List every signal you find in the \
+signals_found array. Each entry must quote or paraphrase the specific evidence.
+
+Signal categories to scan for:
 
 1. Progress metrics below 100% — "3/19 passing", "16%", "51.6% complete", \
 "16 of 31", "137/945"
@@ -50,53 +52,44 @@ input when the agent should decide itself. Examples: "I cannot responsibly \
 proceed without...", "this requires team lead input", presenting solvable \
 technical problems as organizational blockers. The agent's job is to make \
 technical decisions, not escalate them.
+12. Stubs or skeletons — "Stub (ready for expansion)", placeholder functions, \
+TODO markers, empty implementations described as "framework"
 
-If ANY signal is found: BLOCK immediately. Do not consider session type. Do not \
-rationalize why the signal might be acceptable. The signal IS the decision.
+## Step 2: Decide based on signals_found
 
-**Exception — Verified completion evidence**: The signals above are OVERRIDDEN \
-if the agent provides ALL of the following:
-- 100% completion metrics where both numbers match (e.g., "146/146 PASS", \
-"32/32 operations", NOT "3/19" or "51%")
+### If signals_found is NOT empty:
+
+Default: BLOCK. The signal IS the decision.
+
+**Exception — Verified completion overrides signals**: Signals are overridden \
+ONLY if ALL of the following are true:
+- 100% completion metrics FOR THE OVERALL TASK where both numbers match \
+(e.g., "146/146 PASS", "32/32 operations", NOT "3/19" or "51%"). A sub-metric \
+like "10/10 Phase 1 operations" does NOT count if the overall task has more \
+phases, more operations, or more work remaining. Cherry-picked completion of a \
+SUBSET is not completion of the TASK.
 - Concrete verification output (test results with counts, build passing, \
 commit hashes)
-- Zero failures, zero remaining items, zero placeholders
+- Zero failures, zero remaining items, zero placeholders, zero stubs
+- No "remaining work", "next session", "future development", "estimated \
+completion", or any language implying work is left
 
-In this case, skip to Step 2. A completion report backed by verified evidence \
-is not a "session summary" or "permission-seeking" — it is proof of task \
-completion. The purpose of Step 1 signals is to catch agents that AVOID work, \
-not agents that PROVE they finished it.
+If ALL conditions are met, the signals are false positives — ALLOW. \
+Otherwise BLOCK.
 
-An agent that explains WHY it cannot finish is still not finished. An agent that \
-says "Phase N complete, next is Phase N+1" has finished a fraction, not the task. \
-An agent that presents a menu of options is avoiding work, not completing it.
+### If signals_found IS empty:
 
-## Step 2: Determine session type (ONLY if zero signals found in Step 1)
+Determine session type, then decide:
 
-You may ONLY reach this step if Step 1 found NO signals.
+INTERACTIVE (user is present and conversing — short questions, commands, \
+back-and-forth): ALLOW if the agent answered the question or completed the \
+action and no work is being abandoned.
 
-INTERACTIVE — the user is present and conversing:
-- Short questions, commands, or feedback
-- Back-and-forth dialogue
-
-AUTONOMOUS — the user assigned a task and left:
-- References to a spec, plan, or document with implementation steps
-- A multi-step task the agent is executing independently
-
-### INTERACTIVE sessions — default ALLOW
-
-ALLOW if the agent answered the user's question or completed a requested action \
-and no work is being abandoned.
-
-### AUTONOMOUS sessions — default BLOCK
-
-ALLOW only if:
-- The task is complete with concrete evidence (tests pass, requirements met)
-- The agent hit a genuine external blocker (needs a secret, credentials, or a \
-policy decision that only the user can make — NOT choosing between technical \
-approaches, tools, or implementation strategies; the agent must decide those)
-
-BLOCK for everything else.
+AUTONOMOUS (user assigned a task and left — references to a spec/plan, \
+multi-step task): ALLOW only if the task is complete with concrete evidence \
+OR the agent hit a genuine external blocker (needs a secret, credentials, \
+or a policy decision only the user can make — NOT choosing between technical \
+approaches).
 
 ## Step 3: Check for KILL
 
@@ -133,8 +126,12 @@ Bad block messages:
 
 ## Response format
 
+You MUST populate signals_found BEFORE choosing a decision. List every signal \
+you found. If you found none, use an empty array.
+
 Respond with exactly this JSON structure:
-{"session_type": "interactive"|"autonomous", "decision": "allow"|"block"|"kill", \
+{"signals_found": ["<signal 1>", ...], \
+"session_type": "interactive"|"autonomous", "decision": "allow"|"block"|"kill", \
 "reason": "<your internal reasoning>", "message": "<message to the agent>"}
 """
 
@@ -142,6 +139,11 @@ Respond with exactly this JSON structure:
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
+        "signals_found": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "List every incomplete-work signal found in the agent's last message. Each entry should quote or paraphrase the specific evidence.",
+        },
         "session_type": {
             "type": "string",
             "enum": ["interactive", "autonomous"],
@@ -153,7 +155,7 @@ RESPONSE_SCHEMA = {
         "reason": {"type": "string"},
         "message": {"type": "string"},
     },
-    "required": ["session_type", "decision", "reason", "message"],
+    "required": ["signals_found", "session_type", "decision", "reason", "message"],
     "additionalProperties": False,
 }
 
@@ -200,52 +202,39 @@ class StopHook(Hook):
         r"\ball\s+\d+\s+(?:tests?|assertions?|scenarios?)\s+(?:pass|PASS)",
     ]
 
+    # Structural completion markers — the agent is declaring full task completion.
+    # When paired with completion evidence (N/N metrics, no failures),
+    # this is strong enough to ALLOW without LLM evaluation.
+    STRUCTURAL_COMPLETION_PATTERNS = [
+        r"(?:ALL|EVERY)\s+(?:STEPS?|TASKS?|ITEMS?)\s+COMPLETED?",
+        r"FULLY\s+COMPLETE",
+        r"\bALL\s+(?:REQUIREMENTS?|CHECKLIST\s+ITEMS?)\s+(?:SATISFIED|MET|DONE)",
+    ]
+
     # Patterns that negate completion evidence (failures still present).
-    # These must not trigger on zero-count reports like "0 failures".
+    # ONLY unambiguous failure signals belong here. Semantic interpretation
+    # (e.g. "is this 'not implemented' about the task or a Tier 2 feature?")
+    # is the LLM's job, not regex's job.
     COMPLETION_NEGATION_PATTERNS = [
         r"❌",
         r"\bFAILED\b",
         r"\bFAILING\b",
         r"[1-9]\d*\s+failures?",  # N failures where N > 0
         r"\bbroken\b",
-        r"remaining (?:work|tasks|items)",
-        r"placeholder (?:implementation|code|stub|logic|handler)s?",
-        r"\bTODO\b",
-        r"not (?:yet |fully )?(?:implemented|complete|done|working)",
     ]
 
-    # Regex patterns that always BLOCK regardless of LLM judgment.
-    # These catch common work-avoidance patterns in the assistant's last message.
-    PRECHECK_BLOCK_PATTERNS = [
-        # Permission-seeking
-        r"(?:shall i|should i|would you like me to|want me to) (?:proceed|continue|start|go ahead)",
-        r"ready for (?:your )?feedback",
-        r"ready to continue",
-        r"let me know (?:if|when|how) you",
-        r"what would you like",
-        # Deferring work
-        r"(?:remaining|next|future) (?:session|iteration|phase)",
-        r"next up is",
-        r"(?:resume|continue|pick up) (?:work|this|the work|implementation)",
-        r"future (?:remediation|implementation|development)",
-        # Admitting incomplete work
-        r"remaining (?:work|failures|tasks|items|scenarios)",
-        r"(?:implementation|work) continues",
-        r"\d+\s+open\b",
-        r"placeholder (?:implementation|code|stub|logic|handler)s?",
-        # Rationalizing partial completion
-        r"(?:significant|solid|good|great|substantial) (?:progress|foundation|start)",
-        r"progressing (?:well|nicely|smoothly)",
-        # Failures reported
-        r"❌",
-        r"\d+\s*(?:/\s*\d+\s+)?failing",
-        r"failures?\s*[:(]",
-        r"CRITICAL",
-        r"PANIC",
-        # Progress metrics below 100%
-        r"\b\d{1,2}\.?\d*%\s*\(\d+/\d+\)",
-        r"\b\d{1,2}\.?\d*%\s*pass(?:ing)?\s+rate",
-    ]
+    # No precheck block patterns. ALL semantic evaluation goes to the LLM.
+    #
+    # Previously this list contained regex patterns for permission-seeking,
+    # deferring work, failure markers, etc. These were removed because:
+    # 1. Regex cannot understand context — "Remaining Work" as a section
+    #    header vs. an admission of incompleteness requires semantic judgment.
+    # 2. The LLM prompt (SYSTEM_PROMPT Step 1) already lists all these signals.
+    # 3. The plan/spec referenced in the prompt tells the LLM what the agent
+    #    should do — regex short-circuits that evaluation.
+    # 4. False positives from regex are worse than false negatives from the LLM
+    #    because they block legitimate completion with no recourse.
+    PRECHECK_BLOCK_PATTERNS: list[str] = []
 
     def _has_completion_evidence(self, text: str, debug: DebugFn) -> bool:
         """Check if text contains strong completion evidence (100% metrics, all passing).
@@ -275,6 +264,20 @@ class StopHook(Hook):
 
         debug("Strong completion evidence detected - skipping precheck block patterns")
         return True
+
+    def _has_structural_completion(self, text: str, debug: DebugFn) -> bool:
+        """Check if text contains structural completion markers.
+
+        These are explicit declarations that ALL work is done (not partial).
+        Combined with completion evidence, this is strong enough to ALLOW directly.
+        """
+        if not text:
+            return False
+        for pattern in self.STRUCTURAL_COMPLETION_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                debug(f"Structural completion marker found: {pattern}")
+                return True
+        return False
 
     def _precheck_assistant(self, text: str, debug: DebugFn) -> str | None:
         """Check assistant text against hard-coded block patterns.
@@ -319,7 +322,8 @@ class StopHook(Hook):
 
     def handle(self, hook_input: dict[str, Any], debug: DebugFn) -> HookResult:
         """Handle stop hook event."""
-        debug(f"Stop hook: LLM configured: {self.llm_provider is not None}")
+        llm_ready = self.llm_provider is not None and self.llm_provider.is_configured()
+        debug(f"Stop hook: LLM configured: {llm_ready}")
 
         transcript_path = hook_input.get("transcript_path", "")
         cwd = hook_input.get("cwd", os.getcwd())
@@ -374,6 +378,11 @@ class StopHook(Hook):
         # Skip if strong completion evidence (100% metrics, no failures) is present —
         # let the LLM evaluate whether the completion is genuine.
         has_completion_evidence = self._has_completion_evidence(last_assistant, debug)
+        if has_completion_evidence and self._has_structural_completion(last_assistant, debug):
+            debug("Strong completion: metrics + structural markers - allowing stop")
+            return HookResult.allow(
+                "Verified completion: matching metrics and structural completion markers"
+            )
         if not has_completion_evidence:
             block_msg = self._precheck_assistant(last_assistant, debug)
             if block_msg:
@@ -401,11 +410,12 @@ class StopHook(Hook):
         )
         debug(f"User prompt length: {len(user_prompt)}")
 
-        # Call LLM - if not configured, default to ALLOW
-        # (Precheck patterns already caught obvious work-avoidance cases)
+        # Call LLM - if not configured, default to BLOCK.
+        # With precheck patterns removed, the LLM is the only thing evaluating
+        # whether work is complete. Without it, we must assume it isn't.
         if not self.llm_provider or not self.llm_provider.is_configured():
-            debug("No LLM configured - allowing (precheck patterns handle obvious cases)")
-            return HookResult.allow("No LLM configured")
+            debug("No LLM configured - blocking (no precheck patterns to evaluate signals)")
+            return HookResult.block("Keep going.")
 
         debug("Calling LLM...")
         response = self.llm_provider.call(
@@ -429,11 +439,15 @@ class StopHook(Hook):
                 metadata={"response_schema": RESPONSE_SCHEMA},
             )
 
+        signals_found = response.content.get("signals_found", [])
         session_type = response.content.get("session_type", "autonomous")
         decision = response.content.get("decision", "block")  # Default to BLOCK
         reason = response.content.get("reason", "")
         message = response.content.get("message", "")
 
+        debug(f"Signals found: {len(signals_found)}")
+        for sig in signals_found:
+            debug(f"  - {sig}")
         debug(f"Session type: {session_type}, Decision: {decision}")
 
         if decision == "kill":
