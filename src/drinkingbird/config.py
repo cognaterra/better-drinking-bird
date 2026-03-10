@@ -98,19 +98,56 @@ class LLMConfig:
     api_version: str = "2024-08-01-preview"  # Azure API version
 
     def get_api_key(self) -> str | None:
-        """Get API key from config or environment variable."""
+        """Get API key from config or environment variable.
+
+        Falls back to sourcing the user's shell profile if the env var
+        isn't in the current process environment (common in hook subprocesses
+        that don't source .zshrc/.bashrc).
+        """
         if self.api_key:
             return self.api_key
-        if self.api_key_env:
-            return os.environ.get(self.api_key_env)
-        # Fallback to common env vars by provider
-        env_vars = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "azure": "AZURE_OPENAI_API_KEY",
-        }
-        if self.provider in env_vars:
-            return os.environ.get(env_vars[self.provider])
+
+        # Determine which env var to check
+        env_var = self.api_key_env
+        if not env_var:
+            env_vars = {
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "azure": "AZURE_OPENAI_API_KEY",
+            }
+            env_var = env_vars.get(self.provider)
+
+        if not env_var:
+            return None
+
+        # Try current environment first
+        key = os.environ.get(env_var)
+        if key:
+            return key
+
+        # Hook subprocesses often don't source shell profiles.
+        # Try extracting from .zshrc/.bashrc as a last resort.
+        return self._resolve_key_from_shell(env_var)
+
+    @staticmethod
+    def _resolve_key_from_shell(env_var: str) -> str | None:
+        """Extract an env var value from shell profile files."""
+        import pathlib
+        import re as re_mod
+
+        home = pathlib.Path.home()
+        for profile in [home / ".zshrc", home / ".bashrc", home / ".zprofile", home / ".bash_profile"]:
+            if not profile.exists():
+                continue
+            try:
+                text = profile.read_text()
+                # Match: export VAR=value or export VAR="value" or export VAR='value'
+                pattern = rf'^export\s+{re.escape(env_var)}=["\']?([^"\'#\n]+)["\']?'
+                match = re_mod.search(pattern, text, re_mod.MULTILINE)
+                if match:
+                    return match.group(1).strip()
+            except (PermissionError, OSError):
+                continue
         return None
 
 

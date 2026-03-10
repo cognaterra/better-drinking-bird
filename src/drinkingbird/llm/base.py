@@ -94,6 +94,11 @@ class LLMProvider(ABC):
             return True
         if self._api_key_env:
             key = os.environ.get(self._api_key_env)
+            if not key:
+                # Hook subprocesses don't source shell profiles.
+                # Fall back to parsing .zshrc/.bashrc directly.
+                from drinkingbird.config import LLMConfig
+                key = LLMConfig._resolve_key_from_shell(self._api_key_env)
             if key:
                 self.api_key = key
                 return True
