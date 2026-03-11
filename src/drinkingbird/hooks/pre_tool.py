@@ -66,11 +66,12 @@ class PreToolHook(Hook):
             return HookResult.allow("Not a Bash command")
 
         command = tool_input.get("command", "")
+        description = tool_input.get("description", "")
         debug(f"Command: {command[:200]}")
 
         # Step 1: Check regex patterns FIRST for fast blocking
         enabled_categories = getattr(self.config, "categories", None)
-        is_forbidden, reason = check_command(command, enabled_categories)
+        is_forbidden, reason = check_command(command, enabled_categories, description)
 
         if is_forbidden:
             debug(f"BLOCKED by pattern: {reason}")

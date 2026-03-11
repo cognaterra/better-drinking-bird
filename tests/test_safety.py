@@ -157,6 +157,51 @@ class TestCheckCommand:
         assert is_blocked is False
 
 
+class TestDescriptionBlocking:
+    """Tests for description-based pattern blocking."""
+
+    @pytest.mark.parametrize("description,should_block", [
+        # Should block - git history investigation via description
+        ("check the git history", True),
+        ("Check the git history for changes", True),
+        ("look at git log for the bug", True),
+        ("inspect git blame on this file", True),
+        ("review the git history", True),
+        ("examine git log to find the cause", True),
+        ("browse git history", True),
+        ("search git log for the change", True),
+        ("git history to find the regression", True),
+        ("git log to see what changed", True),
+        ("git blame to understand who wrote this", True),
+
+        # Should NOT block - unrelated descriptions
+        ("run the test suite", False),
+        ("install dependencies", False),
+        ("check the build output", False),
+        ("list files in src", False),
+    ])
+    def test_description_blocking(self, description, should_block):
+        """Test that descriptions are blocked/allowed correctly."""
+        # Use a benign command - the block should come from description
+        is_blocked, reason = check_command("echo hello", description=description)
+
+        assert is_blocked == should_block, (
+            f"Description '{description}' block={is_blocked}, expected={should_block}"
+        )
+        if should_block:
+            assert "history" in reason.lower() or "code" in reason.lower()
+
+    def test_description_not_checked_when_category_disabled(self):
+        """Description patterns respect category enable/disable."""
+        categories = {"git_history": False}
+        is_blocked, _ = check_command(
+            "echo hello",
+            enabled_categories=categories,
+            description="check the git history",
+        )
+        assert is_blocked is False
+
+
 class TestGetEnabledPatterns:
     """Tests for get_enabled_patterns function."""
 

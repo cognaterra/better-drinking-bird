@@ -13,6 +13,8 @@ class SafetyPattern:
     pattern: str
     reason: str
     category: str
+    # Which fields to match against: "command" (default), "description", or "both"
+    target: str = "command"
 
 
 # Organized by category for easy enable/disable
@@ -141,6 +143,18 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
             "Don't use git blame. Claude wrote those commits. Read the actual code.",
             "git_history",
         ),
+        SafetyPattern(
+            r"(?:check|look\s+at|inspect|review|examine|browse|search)\s+(?:the\s+)?git\s+(?:history|log|blame)",
+            "Bugs aren't solved in history. Read the actual code.",
+            "git_history",
+            target="description",
+        ),
+        SafetyPattern(
+            r"git\s+(?:history|log|blame)\s+(?:to\s+(?:find|see|check|understand)|for)",
+            "Bugs aren't solved in history. Read the actual code.",
+            "git_history",
+            target="description",
+        ),
     ],
     "credential_access": [
         SafetyPattern(
@@ -193,12 +207,14 @@ def get_enabled_patterns(enabled_categories: dict[str, bool]) -> list[SafetyPatt
 def check_command(
     command: str,
     enabled_categories: dict[str, bool] | None = None,
+    description: str = "",
 ) -> tuple[bool, str]:
     """Check if command matches any forbidden pattern.
 
     Args:
         command: The command to check
         enabled_categories: Which categories are enabled. If None, all enabled.
+        description: The tool's description field (checked by description-targeted patterns)
 
     Returns:
         Tuple of (is_forbidden, reason)
@@ -215,9 +231,18 @@ def check_command(
 
     patterns = get_enabled_patterns(enabled_categories)
 
-    # Check each pattern
+    # Check each pattern against its target field
     for sp in patterns:
-        if re.search(sp.pattern, command, re.IGNORECASE):
-            return True, sp.reason
+        if sp.target == "description":
+            if description and re.search(sp.pattern, description, re.IGNORECASE):
+                return True, sp.reason
+        elif sp.target == "both":
+            if re.search(sp.pattern, command, re.IGNORECASE):
+                return True, sp.reason
+            if description and re.search(sp.pattern, description, re.IGNORECASE):
+                return True, sp.reason
+        else:  # "command" (default)
+            if re.search(sp.pattern, command, re.IGNORECASE):
+                return True, sp.reason
 
     return False, ""
