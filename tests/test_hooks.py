@@ -730,90 +730,40 @@ class TestStopHook:
             os.unlink(transcript_path)
 
 
-class TestStopHookCompletionNegation:
-    """Tests for completion evidence negation in StopHook.
+class TestStopHookLLMCompletion:
+    """Tests that all completion evaluation goes to the LLM.
 
-    Only unambiguous failure signals (FAILED, ❌, N failures) negate
-    completion evidence. Semantic interpretation is the LLM's job.
+    No regex shortcuts — the LLM decides whether work is complete.
     """
 
     def setup_method(self):
         """Set up test fixtures."""
-        self.hook = StopHook(config=None)
-        self.debug_messages = []
-
-    def debug(self, msg):
-        self.debug_messages.append(msg)
-
-    def test_failed_negates_completion_evidence(self):
-        """Explicit FAILED marker negates completion evidence."""
-        text = "151/151 scenarios run\n3 FAILED"
-        assert not self.hook._has_completion_evidence(text, self.debug)
-
-    def test_failure_count_negates_completion_evidence(self):
-        """N failures (N > 0) negates completion evidence."""
-        text = "146/146 tests run\n2 failures"
-        assert not self.hook._has_completion_evidence(text, self.debug)
-
-    def test_error_emoji_negates_completion_evidence(self):
-        """❌ negates completion evidence."""
-        text = "36/36 operations\n❌ Build failed"
-        assert not self.hook._has_completion_evidence(text, self.debug)
-
-    def test_genuine_completion_not_negated(self):
-        """Genuine 100% completion with no failure signals passes."""
-        text = (
-            "All 146/146 tests PASS\n"
-            "Build successful, 0 failures\n"
-            "Committed as abc1234\n"
-        )
-        assert self.hook._has_completion_evidence(text, self.debug)
-
-    def test_genuine_completion_with_tier2_followups_not_negated(self):
-        """Completion with out-of-scope follow-ups should NOT be negated.
-
-        Regression: 'Not implemented (Tier 2 feature)' was incorrectly
-        matching a negation pattern and blocking genuine completion.
-        """
-        text = (
-            "36/36 Tier 1 operations available\n"
-            "151/151 PASSED (100%)\n"
-            "cargo check: PASSED\n"
-            "Known Follow-ups\n"
-            "1. Rosetta Type Mappings - Not implemented (Tier 2 feature)\n"
-            "2. Porting Features - Not implemented (Tier 2 feature)\n"
-        )
-        assert self.hook._has_completion_evidence(text, self.debug)
-
-    def test_permission_seeking_goes_to_llm(self):
-        """Permission-seeking patterns are evaluated by LLM, not precheck.
-
-        Patterns like 'Which option would you prefer?' require semantic
-        context — the LLM determines if this is work avoidance or legitimate.
-        """
-        text = (
-            "There are two options:\n\n"
-            "Which option would you prefer?"
-        )
-        # No precheck block — goes to LLM
-        result = self.hook._precheck_assistant(text, self.debug)
-        assert result is None
-
-    def test_perl_stub_report_goes_to_llm(self):
-        """Perl stub report should reach the LLM for semantic evaluation.
-
-        Semantically ambiguous signals like 'Remaining Work', 'Next Session',
-        and stub descriptions are NOT precheck-blocked — the LLM evaluates
-        them in context.
-        """
         from unittest.mock import Mock
         from drinkingbird.config import StopHookConfig
 
-        mock_llm = Mock()
-        mock_llm.is_configured.return_value = True
-        # LLM should block this — it's the LLM's job to interpret
-        mock_llm.call.return_value = Mock(
+        self.mock_llm = Mock()
+        self.mock_llm.is_configured.return_value = True
+        self.debug_messages = []
+
+        config = StopHookConfig()
+        self.mock_llm_allow = Mock()
+        self.mock_llm_allow.is_configured.return_value = True
+        self.mock_llm_allow.call.return_value = Mock(
             content={
+                "signals_found": [],
+                "session_type": "autonomous",
+                "decision": "allow",
+                "reason": "All work complete with verification",
+                "message": "",
+            },
+            model="gpt-4o-mini",
+            usage=None,
+        )
+        self.mock_llm_block = Mock()
+        self.mock_llm_block.is_configured.return_value = True
+        self.mock_llm_block.call.return_value = Mock(
+            content={
+                "signals_found": ["Stub implementations present"],
                 "session_type": "autonomous",
                 "decision": "block",
                 "reason": "Stub implementations are not completion",
@@ -823,22 +773,21 @@ class TestStopHookCompletionNegation:
             usage=None,
         )
 
-        config = StopHookConfig()
-        hook = StopHook(config=config, llm_provider=mock_llm)
+        self.config = config
+
+    def debug(self, msg):
+        self.debug_messages.append(msg)
+
+    def test_genuine_completion_goes_to_llm(self):
+        """Genuine completion with metrics goes to LLM for evaluation."""
+        hook = StopHook(config=self.config, llm_provider=self.mock_llm_allow)
 
         report = (
-            "Final Status Report - Perl Language Review Session\n\n"
-            "Phase 1 (Simple Refactorings): 100% Framework Complete (10/10 operations)\n"
-            "1. add_my_declaration - Fully implemented + working\n"
-            "2. convert_unless_to_if - Implemented\n"
-            "3. remove_redundant_parens - Stub (ready for expansion)\n"
-            "4. add_parens_for_precedence - Stub (ready for expansion)\n\n"
-            "Remaining Perl Tier 1 Work (20 operations)\n\n"
-            "Recommendations for Next Session\n"
-            "1. Complete Type Definitions\n"
-            "2. Expand Phase 1 Implementations\n\n"
-            "Progress: From 3/105 operations (2.9%) to 15/105 operations (14.3%)\n"
-            "Estimated completion: ~20-30 hours\n"
+            "✅ ALL STEPS COMPLETED\n\n"
+            "PR #206: feat(scala): Complete Tier 1 (36/36 operations)\n"
+            "All 146/146 tests PASS\n"
+            "Build successful\n"
+            "All checklist items satisfied."
         )
 
         hook_input = {
@@ -847,145 +796,164 @@ class TestStopHookCompletionNegation:
             "last_assistant_message": report,
         }
 
-        debug_messages = []
-        result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
+        result = hook.handle(hook_input, self.debug)
 
+        # LLM MUST be called — no regex shortcut
+        self.mock_llm_allow.call.assert_called_once()
+        assert result.decision == Decision.ALLOW
+
+    def test_stub_report_goes_to_llm(self):
+        """Reports with stubs go to LLM for evaluation."""
+        hook = StopHook(config=self.config, llm_provider=self.mock_llm_block)
+
+        report = (
+            "Phase 1: 10/10 operations\n"
+            "3. remove_redundant_parens - Stub (ready for expansion)\n"
+            "Remaining Work (20 operations)\n"
+            "Progress: 15/105 (14.3%)\n"
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        result = hook.handle(hook_input, self.debug)
+
+        self.mock_llm_block.call.assert_called_once()
+        assert result.decision == Decision.BLOCK
+
+    def test_permission_seeking_goes_to_llm(self):
+        """Permission-seeking text goes to LLM for semantic evaluation."""
+        hook = StopHook(config=self.config, llm_provider=self.mock_llm_block)
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": "Which option would you prefer?",
+        }
+
+        result = hook.handle(hook_input, self.debug)
+        self.mock_llm_block.call.assert_called_once()
+
+    def test_completion_with_failures_goes_to_llm(self):
+        """Completion claims with failures go to LLM."""
+        hook = StopHook(config=self.config, llm_provider=self.mock_llm_block)
+
+        report = (
+            "ALL STEPS COMPLETED\n"
+            "36/36 operations\n"
+            "❌ 2 tests FAILED\n"
+        )
+
+        hook_input = {
+            "transcript_path": "",
+            "cwd": "/tmp",
+            "last_assistant_message": report,
+        }
+
+        result = hook.handle(hook_input, self.debug)
+
+        self.mock_llm_block.call.assert_called_once()
         assert result.decision == Decision.BLOCK
 
 
-class TestStopHookStrongCompletionAllow:
-    """Tests for strong completion evidence that should ALLOW without LLM.
-
-    When completion evidence (N/N metrics, no failures) is paired with
-    structural completion markers (ALL STEPS COMPLETED, FULLY COMPLETE),
-    the hook should ALLOW directly without LLM evaluation.
-    """
+class TestStopHookHardBlock:
+    """Tests for hard-block patterns that fire before the LLM."""
 
     def setup_method(self):
-        """Set up test fixtures."""
         from unittest.mock import Mock
         from drinkingbird.config import StopHookConfig
 
-        # LLM that would BLOCK if called — proving we bypass it
+        # LLM that would ALLOW — proves we block before calling it
         self.mock_llm = Mock()
         self.mock_llm.is_configured.return_value = True
         self.mock_llm.call.return_value = Mock(
             content={
+                "signals_found": [],
                 "session_type": "autonomous",
-                "decision": "block",
-                "reason": "Session summary detected",
-                "message": "Continue working.",
+                "decision": "allow",
+                "reason": "All complete",
+                "message": "",
             },
             model="gpt-4o-mini",
             usage=None,
         )
-
-        config = StopHookConfig()
-        self.hook = StopHook(config=config, llm_provider=self.mock_llm)
+        self.config = StopHookConfig()
         self.debug_messages = []
 
     def debug(self, msg):
         self.debug_messages.append(msg)
 
-    def test_all_steps_completed_with_metrics_allows(self):
-        """Exact scenario: agent completed all work, committed, pushed, PR created.
-
-        This is the real-world case that was incorrectly blocked.
-        """
-        report = (
-            "✅ ALL STEPS COMPLETED\n\n"
-            "1. ✅ Code committed and pushed\n"
-            "  - Commits: 2 commits (de4a5a36, 93998f56)\n"
-            "  - Pushed: Branch pushed to origin\n\n"
-            "2. ✅ Tracking document updated\n"
-            "  - Ops: 34 → 36\n\n"
-            "3. ✅ origin main fetched and merged\n\n"
-            "4. ✅ Pull Request created\n"
-            "  PR #206: feat(scala): Complete Tier 1 operations wiring "
-            "(36/36 operations)\n\n"
-            "Final Status: Scala Language Module Review ✅ FULLY COMPLETE\n\n"
-            "All checklist items satisfied, all proof checks provided, "
-            "code committed, pushed, and PR created for review."
+    def _run(self, text):
+        hook = StopHook(config=self.config, llm_provider=self.mock_llm)
+        result = hook.handle(
+            {"transcript_path": "", "cwd": "/tmp", "last_assistant_message": text},
+            self.debug,
         )
+        return result
 
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
-
-        result = self.hook.handle(hook_input, self.debug)
-
-        assert result.decision == Decision.ALLOW, (
-            f"Expected ALLOW for clearly completed work, got {result.decision}. "
-            f"Debug: {self.debug_messages}"
+    def test_zero_of_n_blocks_without_llm(self):
+        """0/27 operations blocks before calling LLM."""
+        result = self._run(
+            "Status: PARTIAL IMPLEMENTATION\n"
+            "Tier 1 operations NOT implemented (0/27 done)\n"
+            "All 11,357 tests PASS\n"
         )
-        # LLM should NOT have been called
+        assert result.decision == Decision.BLOCK
         self.mock_llm.call.assert_not_called()
 
-    def test_fully_complete_with_nn_metrics_allows(self):
-        """N/N metrics + FULLY COMPLETE should ALLOW directly."""
-        report = (
-            "All 146/146 tests PASS\n"
-            "Build successful\n"
-            "Committed as abc1234\n"
-            "PR created: #42\n\n"
-            "Status: FULLY COMPLETE"
+    def test_not_started_blocks_without_llm(self):
+        """NOT STARTED blocks before calling LLM."""
+        result = self._run(
+            "Phase 3 ✅ COMPLETE\n"
+            "Phase 4: Corpus ❌ NOT STARTED\n"
+            "Phase 5: Framework ❌ NOT STARTED\n"
         )
-
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
-
-        result = self.hook.handle(hook_input, self.debug)
-
-        assert result.decision == Decision.ALLOW
+        assert result.decision == Decision.BLOCK
         self.mock_llm.call.assert_not_called()
 
-    def test_completion_metrics_without_structural_markers_goes_to_llm(self):
-        """N/N metrics alone (no structural markers) should still go to LLM.
+    def test_partial_implementation_blocks_without_llm(self):
+        """PARTIAL IMPLEMENTATION status blocks before calling LLM."""
+        result = self._run("Status: PARTIAL IMPLEMENTATION (Parser Complete)")
+        assert result.decision == Decision.BLOCK
+        self.mock_llm.call.assert_not_called()
 
-        This prevents gaming — just saying "36/36" without clear structural
-        completion shouldn't bypass LLM evaluation.
-        """
-        report = (
-            "36/36 operations wired.\n"
-            "Here's what we did today and what's next."
+    def test_estimated_effort_blocks_without_llm(self):
+        """Estimated effort to complete blocks before calling LLM."""
+        result = self._run(
+            "Estimated effort to complete: 150-200 hours of development work."
         )
+        assert result.decision == Decision.BLOCK
+        self.mock_llm.call.assert_not_called()
 
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
+    def test_svelte_report_blocks_without_llm(self):
+        """The exact Svelte completion report that slipped through is blocked."""
+        report = (
+            "Status: PARTIAL IMPLEMENTATION (Parser & Language Support Complete)\n\n"
+            "Operations: ⚠️ INCOMPLETE - 0/27 Tier 1 operations implemented\n"
+            "Corpus: ❌ NOT STARTED\n"
+            "Agentic Framework: ❌ NOT STARTED\n\n"
+            "Tier 1 Coverage\n"
+            "❌ 0/27 Tier 1 operations implemented\n\n"
+            "Estimated effort to complete: 27 operations × 4-6 hours each ≈ 150-200 hours\n"
+        )
+        result = self._run(report)
+        assert result.decision == Decision.BLOCK
+        self.mock_llm.call.assert_not_called()
 
-        result = self.hook.handle(hook_input, self.debug)
-
-        # Should reach LLM (which blocks in our mock)
-        self.mock_llm.call.assert_called_once()
-
-    def test_structural_markers_with_failures_does_not_allow(self):
-        """ALL STEPS COMPLETED but with failures should NOT precheck allow."""
+    def test_genuine_completion_still_goes_to_llm(self):
+        """Clean completion report with no hard-block signals reaches the LLM."""
         report = (
             "✅ ALL STEPS COMPLETED\n"
-            "36/36 operations\n"
-            "❌ 2 tests FAILED\n"
-            "FULLY COMPLETE"
+            "PR #206: feat(scala): Complete Tier 1 (36/36 operations)\n"
+            "All 146/146 tests PASS\n"
+            "Build successful\n"
         )
-
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
-
-        result = self.hook.handle(hook_input, self.debug)
-
-        # Completion evidence is negated by ❌/FAILED, so precheck blocks
-        # should fire (or LLM called). Either way, should NOT be ALLOW.
-        assert result.decision != Decision.ALLOW or self.mock_llm.call.called
+        result = self._run(report)
+        self.mock_llm.call.assert_called_once()
+        assert result.decision == Decision.ALLOW
 
 
 class TestStopHookSignalsFoundSchema:

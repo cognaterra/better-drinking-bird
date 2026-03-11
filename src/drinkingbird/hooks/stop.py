@@ -101,8 +101,11 @@ KILL only if:
 ## Block messages
 
 When you BLOCK, write ONE short directive sentence — the single most important \
-next step. Do NOT list multiple steps, do NOT repeat the plan, do NOT write \
-paragraphs. The agent has the plan; it needs a nudge, not a lecture.
+next step FROM THE PLAN/PROMPT. Do NOT invent work. Do NOT list multiple steps. \
+Do NOT repeat the plan. Do NOT write paragraphs. Do NOT mention tools like \
+TodoWrite. The agent has the plan; it needs a nudge, not a lecture.
+
+If the plan/prompt does not contain remaining work, the task is DONE — ALLOW.
 
 Good: "Continue implementing the remaining 15 Tier 1 operations per the plan."
 Good: "Don't ask — decide and execute. Continue with Tier 1 completion."
@@ -111,6 +114,8 @@ Good: "Replace stub implementations with real ones per the plan."
 Bad: Numbered lists of steps (the agent has the plan already)
 Bad: "Great progress so far!" (praising partial work)
 Bad: "Keep going." (too vague when you have the plan)
+Bad: "Call TodoWrite to create tasks..." (inventing process, not in the plan)
+Bad: Inventing task counts, phase names, or steps not in the plan
 
 ## Response format
 
@@ -179,106 +184,32 @@ class StopHook(Hook):
         r"(?:Looks?|Seems?) (?:good|complete|done|finished)",
     ]
 
-    # Patterns indicating verified completion (100% metrics, all passing).
-    # When these are present WITHOUT negation, precheck block patterns are skipped
-    # and the LLM evaluates whether this is genuine completion.
-    COMPLETION_EVIDENCE_PATTERNS = [
-        # N/N where both numbers match (e.g., "146/146", "32/32")
-        r"(\d+)/\1\b",
-        # Explicit all-pass with count
-        r"\b\d{2,}\s+tests?\s+PASS",
-        r"\ball\s+\d+\s+(?:tests?|assertions?|scenarios?)\s+(?:pass|PASS)",
+    # Hard-block patterns: unambiguous evidence of incomplete work.
+    # These are facts, not interpretations — no context changes their meaning.
+    # The LLM handles everything semantic; these catch what the LLM misses
+    # when dazzled by ✅ markers and passing test counts.
+    HARD_BLOCK_PATTERNS = [
+        # Zero progress on non-zero total (0/27, 0/81, etc.)
+        r"\b0/[1-9]\d*\b",
+        # Explicit "not started" declarations
+        r"\bNOT\s+STARTED\b",
+        # Explicit partial/incomplete status
+        r"\bPARTIAL\s+IMPLEMENTATION\b",
+        # Agent estimating future work hours — work is not done
+        r"\bEstimated\s+(?:effort|time)\s+to\s+complete\b",
     ]
+    def _precheck_hard_block(self, text: str, debug: DebugFn) -> bool:
+        """Check for unambiguous incomplete-work signals that warrant immediate block.
 
-    # Structural completion markers — the agent is declaring full task completion.
-    # When paired with completion evidence (N/N metrics, no failures),
-    # this is strong enough to ALLOW without LLM evaluation.
-    STRUCTURAL_COMPLETION_PATTERNS = [
-        r"(?:ALL|EVERY)\s+(?:STEPS?|TASKS?|ITEMS?)\s+COMPLETED?",
-        r"FULLY\s+COMPLETE",
-        r"\bALL\s+(?:REQUIREMENTS?|CHECKLIST\s+ITEMS?)\s+(?:SATISFIED|MET|DONE)",
-    ]
-
-    # Patterns that negate completion evidence (failures still present).
-    # ONLY unambiguous failure signals belong here. Semantic interpretation
-    # (e.g. "is this 'not implemented' about the task or a Tier 2 feature?")
-    # is the LLM's job, not regex's job.
-    COMPLETION_NEGATION_PATTERNS = [
-        r"❌",
-        r"\bFAILED\b",
-        r"\bFAILING\b",
-        r"[1-9]\d*\s+failures?",  # N failures where N > 0
-        r"\bbroken\b",
-    ]
-
-    # No precheck block patterns. ALL semantic evaluation goes to the LLM.
-    #
-    # Previously this list contained regex patterns for permission-seeking,
-    # deferring work, failure markers, etc. These were removed because:
-    # 1. Regex cannot understand context — "Remaining Work" as a section
-    #    header vs. an admission of incompleteness requires semantic judgment.
-    # 2. The LLM prompt (SYSTEM_PROMPT Step 1) already lists all these signals.
-    # 3. The plan/spec referenced in the prompt tells the LLM what the agent
-    #    should do — regex short-circuits that evaluation.
-    # 4. False positives from regex are worse than false negatives from the LLM
-    #    because they block legitimate completion with no recourse.
-    PRECHECK_BLOCK_PATTERNS: list[str] = []
-
-    def _has_completion_evidence(self, text: str, debug: DebugFn) -> bool:
-        """Check if text contains strong completion evidence (100% metrics, all passing).
-
-        When True, precheck block patterns are skipped to let the LLM evaluate
-        whether this is genuine completion vs. gaming.
+        Returns True if a hard-block pattern is matched.
         """
         if not text:
             return False
-
-        # Must have at least one completion evidence pattern
-        has_evidence = False
-        for pattern in self.COMPLETION_EVIDENCE_PATTERNS:
+        for pattern in self.HARD_BLOCK_PATTERNS:
             if re.search(pattern, text, re.IGNORECASE):
-                has_evidence = True
-                debug(f"Completion evidence found: {pattern}")
-                break
-
-        if not has_evidence:
-            return False
-
-        # Must NOT have negation patterns (failures still present)
-        for pattern in self.COMPLETION_NEGATION_PATTERNS:
-            if re.search(pattern, text, re.IGNORECASE):
-                debug(f"Completion evidence negated by: {pattern}")
-                return False
-
-        debug("Strong completion evidence detected - skipping precheck block patterns")
-        return True
-
-    def _has_structural_completion(self, text: str, debug: DebugFn) -> bool:
-        """Check if text contains structural completion markers.
-
-        These are explicit declarations that ALL work is done (not partial).
-        Combined with completion evidence, this is strong enough to ALLOW directly.
-        """
-        if not text:
-            return False
-        for pattern in self.STRUCTURAL_COMPLETION_PATTERNS:
-            if re.search(pattern, text, re.IGNORECASE):
-                debug(f"Structural completion marker found: {pattern}")
+                debug(f"Hard block pattern matched: {pattern}")
                 return True
         return False
-
-    def _precheck_assistant(self, text: str, debug: DebugFn) -> str | None:
-        """Check assistant text against hard-coded block patterns.
-
-        Returns a block message if matched, None otherwise.
-        """
-        if not text:
-            return None
-        for pattern in self.PRECHECK_BLOCK_PATTERNS:
-            if re.search(pattern, text, re.IGNORECASE):
-                debug(f"Precheck matched: {pattern}")
-                return "Keep going."
-        return None
 
     def _precheck_assistant_hard_blocker(self, text: str, debug: DebugFn) -> bool:
         """Check if assistant hit a hard external blocker (rate limit, auth, etc).
@@ -362,20 +293,10 @@ class StopHook(Hook):
             debug("No assistant text found - allowing (no incomplete work signals)")
             return HookResult.allow("No assistant text to evaluate")
 
-        # Hard gate: block obvious work-avoidance patterns
-        # Skip if strong completion evidence (100% metrics, no failures) is present —
-        # let the LLM evaluate whether the completion is genuine.
-        has_completion_evidence = self._has_completion_evidence(last_assistant, debug)
-        if has_completion_evidence and self._has_structural_completion(last_assistant, debug):
-            debug("Strong completion: metrics + structural markers - allowing stop")
-            return HookResult.allow(
-                "Verified completion: matching metrics and structural completion markers"
-            )
-        if not has_completion_evidence:
-            block_msg = self._precheck_assistant(last_assistant, debug)
-            if block_msg:
-                debug(f"Precheck BLOCK: {block_msg}")
-                return HookResult.block(block_msg)
+        # Hard block: unambiguous incomplete-work signals the LLM can miss
+        # when distracted by passing test counts and ✅ phase markers.
+        if self._precheck_hard_block(last_assistant, debug):
+            return HookResult.block("Keep going.")
 
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")
