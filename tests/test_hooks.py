@@ -446,7 +446,6 @@ class TestStopHook:
         mock_llm.is_configured.return_value = True
         mock_llm.call.return_value = Mock(
             content={
-                "session_type": "autonomous",
                 "decision": "block",
                 "reason": "Phase 3 complete but Phase 4 remains",
                 "message": "Continue with Phase 4.",
@@ -504,7 +503,6 @@ class TestStopHook:
         mock_llm.is_configured.return_value = True
         mock_llm.call.return_value = Mock(
             content={
-                "session_type": "autonomous",
                 "decision": "block",
                 "reason": "Agent asking what to do instead of working",
                 "message": "Don't ask. Continue with the plan.",
@@ -653,8 +651,6 @@ class TestStopHook:
         mock_llm.is_configured.return_value = True
         mock_llm.call.return_value = Mock(
             content={
-                "signals_found": [],
-                "session_type": "autonomous",
                 "decision": "block",
                 "reason": "Agent self-declaration without evidence",
                 "message": "Keep going.",
@@ -750,8 +746,6 @@ class TestStopHookLLMCompletion:
         self.mock_llm_allow.is_configured.return_value = True
         self.mock_llm_allow.call.return_value = Mock(
             content={
-                "signals_found": [],
-                "session_type": "autonomous",
                 "decision": "allow",
                 "reason": "All work complete with verification",
                 "message": "",
@@ -763,8 +757,6 @@ class TestStopHookLLMCompletion:
         self.mock_llm_block.is_configured.return_value = True
         self.mock_llm_block.call.return_value = Mock(
             content={
-                "signals_found": ["Stub implementations present"],
-                "session_type": "autonomous",
                 "decision": "block",
                 "reason": "Stub implementations are not completion",
                 "message": "Replace stubs with real implementations.",
@@ -871,8 +863,6 @@ class TestStopHookHardBlock:
         self.mock_llm.is_configured.return_value = True
         self.mock_llm.call.return_value = Mock(
             content={
-                "signals_found": [],
-                "session_type": "autonomous",
                 "decision": "allow",
                 "reason": "All complete",
                 "message": "",
@@ -956,66 +946,6 @@ class TestStopHookHardBlock:
         assert result.decision == Decision.ALLOW
 
 
-class TestStopHookSignalsFoundSchema:
-    """Tests that RESPONSE_SCHEMA forces signal enumeration via signals_found.
-
-    The LLM must enumerate all detected signals BEFORE making a decision.
-    This prevents the LLM from vibing its way to "allow" without checking.
-    """
-
-    def test_response_schema_includes_signals_found(self):
-        """RESPONSE_SCHEMA must include signals_found as a required array field."""
-        from drinkingbird.hooks.stop import RESPONSE_SCHEMA
-
-        assert "signals_found" in RESPONSE_SCHEMA["properties"]
-        signals_prop = RESPONSE_SCHEMA["properties"]["signals_found"]
-        assert signals_prop["type"] == "array"
-        assert signals_prop["items"]["type"] == "string"
-        assert "signals_found" in RESPONSE_SCHEMA["required"]
-
-    def test_system_prompt_requires_signal_enumeration(self):
-        """SYSTEM_PROMPT must instruct the LLM to list signals before deciding."""
-        from drinkingbird.hooks.stop import SYSTEM_PROMPT
-
-        # The prompt must mention signals_found and require enumeration
-        assert "signals_found" in SYSTEM_PROMPT
-        # The prompt must make clear: list signals FIRST, then decide
-        assert "List every signal" in SYSTEM_PROMPT or "list every signal" in SYSTEM_PROMPT or "enumerate" in SYSTEM_PROMPT.lower()
-
-    def test_signals_found_logged_in_debug(self):
-        """When LLM returns signals_found, they should be explicitly logged."""
-        from unittest.mock import Mock
-        from drinkingbird.config import StopHookConfig
-
-        mock_llm = Mock()
-        mock_llm.is_configured.return_value = True
-        mock_llm.call.return_value = Mock(
-            content={
-                "signals_found": ["sub-100% metrics: 83/105", "stubs present", "next session mentioned"],
-                "session_type": "autonomous",
-                "decision": "block",
-                "reason": "Work incomplete",
-                "message": "Continue implementing.",
-            },
-            model="test-model",
-            usage=None,
-        )
-
-        config = StopHookConfig()
-        hook = StopHook(config=config, llm_provider=mock_llm)
-
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": "Progress: 83/105 operations. Next session: complete remaining.",
-        }
-
-        debug_messages = []
-        hook.handle(hook_input, lambda msg: debug_messages.append(msg))
-
-        debug_text = "\n".join(debug_messages)
-        # Must explicitly log signals count, not just dump the response dict
-        assert "Signals found: 3" in debug_text
 
 
 class TestPreCompactHookGitContext:

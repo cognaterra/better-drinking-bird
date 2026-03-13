@@ -26,13 +26,13 @@ In the famous Simpsons episode, Homer uses a drinking bird toy to repeatedly pre
 
 ```bash
 # Install with uv (recommended)
-uv tool install better-drinking-bird
+uv tool install git+https://github.com/cognaterra/better-drinking-bird.git
 
 # Or with pipx
-pipx install better-drinking-bird
+pipx install git+https://github.com/cognaterra/better-drinking-bird.git
 
 # Or with pip
-pip install better-drinking-bird
+pip install git+https://github.com/cognaterra/better-drinking-bird.git
 ```
 
 ## Quick Start

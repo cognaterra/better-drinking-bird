@@ -171,46 +171,13 @@ Bad: "Attach build logs before requesting merge." (validation instruction)
 
 ## Response format
 
-Respond with exactly this JSON structure, in this order:
-
-{"user_intent": "<summarize the user's most recent instruction>", \
-"agent_followed_user": true|false, \
-"signals_found": ["<signal 1>", ...], \
-"session_type": "interactive"|"autonomous", "decision": "allow"|"block"|"kill", \
-"reason": "<your internal reasoning>", "message": "<message to the agent>"}
-
-user_intent: Summarize what the user's MOST RECENT instruction asks for. \
-If there is no recent instruction (only the original task), write "original task".
-
-agent_followed_user: Is the agent obeying that intent? If true, decision \
-MUST be "allow". Do not proceed to signal scanning.
-
-signals_found: Only relevant if agent_followed_user is false. List every \
-incomplete-work signal. Use empty array if none or if agent_followed_user \
-is true.
+Respond with JSON: {"decision": "allow"|"block"|"kill", "reason": "<your reasoning>", \
+"message": "<message to agent if blocking>"}
 """
 
-# Response schema for structured output
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "user_intent": {
-            "type": "string",
-            "description": "Summarize the user's MOST RECENT instruction. If only the original task exists, write 'original task'.",
-        },
-        "agent_followed_user": {
-            "type": "boolean",
-            "description": "Is the agent obeying the user's most recent intent? If true, decision MUST be allow.",
-        },
-        "signals_found": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Incomplete-work signals found in the agent's last message. Empty array if agent_followed_user is true.",
-        },
-        "session_type": {
-            "type": "string",
-            "enum": ["interactive", "autonomous"],
-        },
         "decision": {
             "type": "string",
             "enum": ["allow", "block", "kill"],
@@ -218,7 +185,7 @@ RESPONSE_SCHEMA = {
         "reason": {"type": "string"},
         "message": {"type": "string"},
     },
-    "required": ["user_intent", "agent_followed_user", "signals_found", "session_type", "decision", "reason", "message"],
+    "required": ["decision", "reason", "message"],
     "additionalProperties": False,
 }
 
@@ -426,23 +393,11 @@ class StopHook(Hook):
             debug(f"LLM error/timeout - allowing stop: {response.content.get('error')}")
             return HookResult.allow(f"LLM unavailable: {response.content.get('error')}")
 
-        signals_found = response.content.get("signals_found", [])
-        agent_followed_user = response.content.get("agent_followed_user", False)
-        session_type = response.content.get("session_type", "autonomous")
-        decision = response.content.get("decision", "block")  # Default to BLOCK
+        decision = response.content.get("decision", "block")
         reason = response.content.get("reason", "")
-
-        # Hard override: if the LLM acknowledges the agent followed user intent,
-        # force ALLOW even if it still decided to block.
-        if agent_followed_user and decision == "block":
-            debug("agent_followed_user=true but decision=block — forcing ALLOW")
-            return HookResult.allow(reason or "Agent followed user instructions")
         message = response.content.get("message", "")
 
-        debug(f"Signals found: {len(signals_found)}")
-        for sig in signals_found:
-            debug(f"  - {sig}")
-        debug(f"Session type: {session_type}, Decision: {decision}")
+        debug(f"Decision: {decision}")
 
         if decision == "kill":
             debug("Killing parent process")
