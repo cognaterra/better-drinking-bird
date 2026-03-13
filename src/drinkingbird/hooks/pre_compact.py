@@ -40,30 +40,44 @@ class PreCompactHook(Hook):
         git_context: dict[str, str] = {}
         if inject_git:
             git_context = self._get_git_context(cwd, transcript_path, debug)
-            debug(f"Git context: branch={'branch' in git_context}, worktree={'worktree_path' in git_context}")
+            debug(f"Git context: branch={git_context.get('branch', 'N/A')}, worktree={git_context.get('worktree_path', 'N/A')}")
 
         # Find default context files (CLAUDE.md, AGENTS.md, README.md)
-        context_files = self._find_default_files(cwd)
-        debug(f"Found {len(context_files)} context files")
-
-        # Read file contents if quoting is enabled
-        quote_files = getattr(self.config, "quote_context_files", True)
+        inject_files = getattr(self.config, "inject_file_references", True)
+        context_files: list[str] = []
         file_contents: dict[str, str] = {}
-        if quote_files and context_files:
-            file_contents = self._read_context_files(cwd, context_files, debug)
-            debug(f"Quoted {len(file_contents)} context files")
+        user_refs: list[str] = []
 
-        # Extract @refs from user messages in transcript
-        user_refs = self._extract_user_refs(transcript_path, cwd, debug)
-        debug(f"Found {len(user_refs)} user @refs")
+        if inject_files:
+            context_files = self._find_default_files(cwd)
+            debug(f"Found {len(context_files)} context files")
 
-        if not context_files and not user_refs and not git_context:
-            debug("No context files, user refs, or git context found")
+            # Read file contents if quoting is enabled
+            quote_files = getattr(self.config, "quote_context_files", True)
+            if quote_files and context_files:
+                file_contents = self._read_context_files(cwd, context_files, debug)
+                debug(f"Quoted {len(file_contents)} context files")
+
+            # Extract @refs from user messages in transcript
+            user_refs = self._extract_user_refs(transcript_path, cwd, debug)
+            debug(f"Found {len(user_refs)} user @refs")
+        else:
+            debug("File reference injection disabled")
+
+        # Extract original prompt if enabled
+        inject_prompt = getattr(self.config, "inject_original_prompt", False)
+        original_prompt: str | None = None
+        if inject_prompt:
+            original_prompt = self._extract_original_prompt(transcript_path, debug)
+            debug(f"Original prompt: {'found' if original_prompt else 'not found'}")
+
+        if not context_files and not user_refs and not git_context and not original_prompt:
+            debug("No context files, user refs, git context, or original prompt found")
             return HookResult.allow("No context to preserve")
 
         # Build reminder
         reminder = self._build_context_reminder(
-            context_files, user_refs, git_context, file_contents
+            context_files, user_refs, git_context, file_contents, original_prompt
         )
         debug(f"Reminder length: {len(reminder)}")
 
@@ -420,12 +434,44 @@ class PreCompactHook(Hook):
         pattern = r"@([\w./-]+)"
         return re.findall(pattern, text)
 
+    def _extract_original_prompt(
+        self, transcript_path: str, debug: DebugFn
+    ) -> str | None:
+        """Extract the first user message from the transcript.
+
+        Returns the text content of the first user message, or None if
+        no user message is found or the transcript cannot be read.
+        """
+        if not transcript_path:
+            debug("No transcript path provided for original prompt extraction")
+            return None
+
+        try:
+            with open(transcript_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    content = self._get_user_content(msg)
+                    if content:
+                        return content
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            debug(f"Cannot read transcript for original prompt: {e}")
+
+        return None
+
     def _build_context_reminder(
         self,
         files: list[str],
         user_refs: list[str],
         git_context: dict[str, str] | None = None,
         file_contents: dict[str, str] | None = None,
+        original_prompt: str | None = None,
     ) -> str:
         """Build a context reminder string.
 
@@ -433,6 +479,14 @@ class PreCompactHook(Hook):
         inline instead of just listed by name.
         """
         parts = []
+
+        if original_prompt:
+            parts.append(
+                "--- Original Prompt ---\n"
+                "```\n"
+                f"{original_prompt}\n"
+                "```"
+            )
 
         if git_context:
             ctx = []

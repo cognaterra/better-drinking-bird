@@ -21,7 +21,38 @@ You receive: the user's original task, any referenced documents (the plan/spec \
 the agent is executing), and the most recent exchange between the user and the \
 agent.
 
-## Step 1: Scan for incomplete-work signals (MANDATORY)
+## Fundamental principle: User authority
+
+The user is the ultimate authority. Your job is to catch the AGENT quitting \
+prematurely — never to override the USER. If the agent is doing what the user \
+asked (including stopping when told to stop, deleting when told to delete, \
+skipping when told to skip), that is correct behavior. ALLOW it. \
+Incomplete-work signals only matter when the AGENT is abandoning work on its \
+own initiative, not when it is following the user's instructions.
+
+## Step 1: Determine user intent (MANDATORY — do this FIRST)
+
+Read the MOST RECENT USER INSTRUCTION. Summarize what the user is asking for \
+in the user_intent field. Then determine: is the agent doing what the user \
+asked? Set agent_followed_user accordingly. If true — ALLOW. Stop here. \
+Do not proceed to signal scanning.
+
+CRITICAL: Interpret the user's instruction LITERALLY, not expansively. \
+The user's words define the scope of this evaluation. Do NOT expand the \
+instruction to encompass the full plan, overall project goals, or remaining \
+work beyond what was asked. If the user asked for a specific action and that \
+action was completed, the agent followed the user — regardless of what other \
+work remains in the plan or project.
+
+Referenced documents (plans, specs) provide CONTEXT for understanding the \
+work. They do NOT override or expand the user's latest instruction. If the \
+plan defines a larger scope than the user's current instruction, evaluate \
+against the instruction, not the plan. The plan is not a mandate — the user \
+is the authority.
+
+## Step 2: Scan for incomplete-work signals
+
+Only reach this step if agent_followed_user is false.
 
 Read the agent's last message line by line. List every signal you find in the \
 signals_found array. Each entry must quote or paraphrase the specific evidence.
@@ -37,10 +68,14 @@ placeholder implementations, items "ready to be wired in"
 4. Rationalizing partial completion — "significant progress", "solid foundation", \
 "progressing well", "main blocker", "blocked by", "due to complexity"
 5. Session summaries — "current status", wrapping up, recapping what was done, \
-listing commits or work completed so far
+listing commits or work completed so far. NOTE: Reporting a final deliverable \
+(PR URL, commit hash) with no remaining work mentioned is completion, not a \
+session summary.
 6. Permission-seeking — "would you like me to", "shall I proceed", "ready for \
 feedback", "let me know", "how would you like", "which direction", \
-"which path should I take"
+"which path should I take". NOTE: Status declarations about completed actions \
+are NOT permission-seeking. "PR created. Ready for merge." is a completion \
+report, not asking permission.
 7. Menus or options — numbered lists of choices ("Three paths forward: 1... \
 2... 3..."), asking the user to choose a direction
 8. Phased framing — calling work a "phase", "milestone", or "stage", or saying \
@@ -55,7 +90,7 @@ technical decisions, not escalate them.
 12. Stubs or skeletons — "Stub (ready for expansion)", placeholder functions, \
 TODO markers, empty implementations described as "framework"
 
-## Step 2: Decide based on signals_found
+## Step 3: Decide based on signals_found
 
 ### If signals_found is NOT empty:
 
@@ -91,7 +126,7 @@ OR the agent hit a genuine external blocker (needs a secret, credentials, \
 or a policy decision only the user can make — NOT choosing between technical \
 approaches).
 
-## Step 3: Check for KILL
+## Step 4: Check for KILL
 
 KILL only if:
 - The agent is looping on the same failure 3+ times with no new approach
@@ -100,42 +135,77 @@ KILL only if:
 
 ## Block messages
 
-When you BLOCK, write ONE short directive sentence — the single most important \
-next step FROM THE PLAN/PROMPT. Do NOT invent work. Do NOT list multiple steps. \
-Do NOT repeat the plan. Do NOT write paragraphs. Do NOT mention tools like \
-TodoWrite. The agent has the plan; it needs a nudge, not a lecture.
+When you BLOCK, write exactly ONE sentence. Not two. Not a sentence with \
+"and then" or "—" chaining more tasks onto it. ONE sentence with ONE verb \
+pointing to the SINGLE most urgent incomplete thing. Stop after the period.
 
-If the plan/prompt does not contain remaining work, the task is DONE — ALLOW.
+CRITICAL RULES:
+- Only reference work that the USER explicitly asked for in their instruction. \
+Do NOT reference work from the plan that the user did not ask for.
+- Do NOT enforce plan-internal steps as user requirements. Plans document \
+intended work; the user's instruction defines what to enforce now.
+- Do NOT mention tools like TodoWrite unless the USER explicitly asked for \
+them in their instruction — not because a plan document mentions them.
+- Do NOT reference phase names, task counts, or steps you made up.
+- If the original task has no remaining work, the task is DONE — ALLOW.
+- NEVER echo escalation back as a command. If the agent asked the user to run \
+a command manually or said it cannot proceed due to a safety block, do NOT tell \
+the agent to "execute that command" or "find a secure way to do it." Instead, \
+tell the agent to find a different technical approach that doesn't require user \
+intervention.
+- NEVER give validation instructions. Your job is to point at incomplete work, \
+NOT to tell the agent how to prove completion. Do NOT say "provide verification", \
+"attach logs", "show evidence", "confirm with tests", or anything requesting \
+proof. The "Verified completion" criteria above are for YOUR internal judgment \
+only — never surface them as commands to the agent.
 
-Good: "Continue implementing the remaining 15 Tier 1 operations per the plan."
-Good: "Don't ask — decide and execute. Continue with Tier 1 completion."
-Good: "Replace stub implementations with real ones per the plan."
+Good: "Continue with the next incomplete item in the plan."
+Good: "Replace the placeholder implementations with real ones."
+Good: "Find an alternative approach that doesn't require user intervention."
 
-Bad: Numbered lists of steps (the agent has the plan already)
-Bad: "Great progress so far!" (praising partial work)
-Bad: "Keep going." (too vague when you have the plan)
-Bad: "Call TodoWrite to create tasks..." (inventing process, not in the plan)
-Bad: Inventing task counts, phase names, or steps not in the plan
+Bad: "Finish X, then run Y, and update Z." (multiple steps — ONE only)
+Bad: "Keep going." (too vague — name the specific incomplete thing)
+Bad: Anything with "and", "then", or "—" connecting multiple tasks
+Bad: "Provide verification that X passes." (validation instruction, not work)
+Bad: "Attach build logs before requesting merge." (validation instruction)
 
 ## Response format
 
-You MUST populate signals_found BEFORE choosing a decision. List every signal \
-you found. If you found none, use an empty array.
+Respond with exactly this JSON structure, in this order:
 
-Respond with exactly this JSON structure:
-{"signals_found": ["<signal 1>", ...], \
+{"user_intent": "<summarize the user's most recent instruction>", \
+"agent_followed_user": true|false, \
+"signals_found": ["<signal 1>", ...], \
 "session_type": "interactive"|"autonomous", "decision": "allow"|"block"|"kill", \
 "reason": "<your internal reasoning>", "message": "<message to the agent>"}
+
+user_intent: Summarize what the user's MOST RECENT instruction asks for. \
+If there is no recent instruction (only the original task), write "original task".
+
+agent_followed_user: Is the agent obeying that intent? If true, decision \
+MUST be "allow". Do not proceed to signal scanning.
+
+signals_found: Only relevant if agent_followed_user is false. List every \
+incomplete-work signal. Use empty array if none or if agent_followed_user \
+is true.
 """
 
 # Response schema for structured output
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
+        "user_intent": {
+            "type": "string",
+            "description": "Summarize the user's MOST RECENT instruction. If only the original task exists, write 'original task'.",
+        },
+        "agent_followed_user": {
+            "type": "boolean",
+            "description": "Is the agent obeying the user's most recent intent? If true, decision MUST be allow.",
+        },
         "signals_found": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "List every incomplete-work signal found in the agent's last message. Each entry should quote or paraphrase the specific evidence.",
+            "description": "Incomplete-work signals found in the agent's last message. Empty array if agent_followed_user is true.",
         },
         "session_type": {
             "type": "string",
@@ -148,7 +218,7 @@ RESPONSE_SCHEMA = {
         "reason": {"type": "string"},
         "message": {"type": "string"},
     },
-    "required": ["signals_found", "session_type", "decision", "reason", "message"],
+    "required": ["user_intent", "agent_followed_user", "signals_found", "session_type", "decision", "reason", "message"],
     "additionalProperties": False,
 }
 
@@ -299,6 +369,8 @@ class StopHook(Hook):
             return HookResult.block("Keep going.")
 
         debug(f"First user: {first_user[:100] if first_user else None}...")
+        debug(f"Last user: {last_user[:100] if last_user else None}...")
+        debug(f"First == Last user: {first_user == last_user}")
         debug(f"Last assistant: {last_assistant[:100] if last_assistant else None}...")
 
         # Extract @mentions from ALL user messages (deduplicated)
@@ -348,10 +420,23 @@ class StopHook(Hook):
                 metadata={"response_schema": RESPONSE_SCHEMA},
             )
 
+        # If the LLM errored or timed out, allow the stop — we can't evaluate signals
+        # and it's wrong to block an agent that may have finished its work.
+        if "error" in response.content:
+            debug(f"LLM error/timeout - allowing stop: {response.content.get('error')}")
+            return HookResult.allow(f"LLM unavailable: {response.content.get('error')}")
+
         signals_found = response.content.get("signals_found", [])
+        agent_followed_user = response.content.get("agent_followed_user", False)
         session_type = response.content.get("session_type", "autonomous")
         decision = response.content.get("decision", "block")  # Default to BLOCK
         reason = response.content.get("reason", "")
+
+        # Hard override: if the LLM acknowledges the agent followed user intent,
+        # force ALLOW even if it still decided to block.
+        if agent_followed_user and decision == "block":
+            debug("agent_followed_user=true but decision=block — forcing ALLOW")
+            return HookResult.allow(reason or "Agent followed user instructions")
         message = response.content.get("message", "")
 
         debug(f"Signals found: {len(signals_found)}")
@@ -423,7 +508,10 @@ class StopHook(Hook):
                                 text_parts.append(block.get("text", ""))
                             elif isinstance(block, str):
                                 text_parts.append(block)
-                        user_messages.append("\n".join(text_parts))
+                        # Skip entries with no text (e.g. tool_result-only messages)
+                        joined = "\n".join(text_parts).strip()
+                        if joined:
+                            user_messages.append(joined)
                 elif isinstance(inner_msg, str):
                     user_messages.append(inner_msg)
             # API format: role="user" at top level
@@ -436,8 +524,9 @@ class StopHook(Hook):
                             text_parts.append(block.get("text", ""))
                         elif isinstance(block, str):
                             text_parts.append(block)
-                    content = "\n".join(text_parts)
-                user_messages.append(content)
+                    content = "\n".join(text_parts).strip()
+                if content:
+                    user_messages.append(content)
         return user_messages
 
     def _extract_user_messages(
@@ -550,13 +639,12 @@ class StopHook(Hook):
         last_assistant = (last_assistant or "").strip()
 
         if last_user and last_user != first_user:
-            parts.append("\n=== RECENT EXCHANGE ===")
-            parts.append(f"User: {last_user}")
+            parts.append("\n=== MOST RECENT USER INSTRUCTION (supersedes original intent) ===")
+            parts.append(last_user)
 
         if last_assistant:
-            if not last_user or last_user == first_user:
-                parts.append("\n=== RECENT EXCHANGE ===")
-            parts.append(f"Assistant: {last_assistant}")
+            parts.append("\n=== AGENT'S RESPONSE ===")
+            parts.append(last_assistant)
 
         result = "\n".join(parts)
         return result if result.strip() else "[No context available]"

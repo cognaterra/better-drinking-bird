@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from drinkingbird.config import Config, load_config
+from drinkingbird.config import Config, load_config, _get_git_root
 from drinkingbird.mode import Mode, get_mode
 from drinkingbird.pause import is_paused
 from drinkingbird.hooks import (
@@ -31,6 +31,14 @@ from drinkingbird.llm.azure import AzureOpenAIProvider
 from drinkingbird.llm.ollama import OllamaProvider
 from drinkingbird.llm.openai import OpenAIProvider
 from drinkingbird.tracing import Tracer
+
+
+def _default_log_dir() -> Path:
+    """Return per-workspace log directory (.bdb/ under git root)."""
+    git_root = _get_git_root()
+    if not git_root:
+        raise RuntimeError("bdb must be run inside a git repository")
+    return git_root / ".bdb"
 
 
 def _resolve_api_key_env(llm_config: Any) -> str | None:
@@ -129,7 +137,7 @@ class Supervisor:
             debug_mode: If True, print debug messages to stderr.
         """
         self.config = config or load_config()
-        self.log_dir = log_dir or Path.home() / ".bdb"
+        self.log_dir = log_dir or _default_log_dir()
         self.debug_mode = debug_mode or os.environ.get("BDB_DEBUG", "") != ""
 
         self.log_file = self.log_dir / "supervisor.log"
@@ -303,9 +311,10 @@ def run() -> None:
     except SystemExit:
         raise
     except Exception as e:
-        # Last resort - never crash
+        # Last resort - never crash; log to workspace if possible
         try:
-            error_file = Path.home() / ".bdb" / "errors.log"
+            log_dir = _default_log_dir()
+            error_file = log_dir / "errors.log"
             error_file.parent.mkdir(parents=True, exist_ok=True)
             with open(error_file, "a") as f:
                 f.write(f"\n[{datetime.now().isoformat()}] CRITICAL: {e}\n")

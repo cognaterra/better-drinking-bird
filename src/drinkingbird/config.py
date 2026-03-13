@@ -56,6 +56,8 @@ DEFAULT_CONFIG = {
         "pre_compact": {
             "enabled": True,
             "inject_git_context": True,
+            "inject_file_references": True,
+            "inject_original_prompt": False,
             "quote_context_files": True,
             "context_patterns": [
                 "docs/plans/*.md",
@@ -68,8 +70,8 @@ DEFAULT_CONFIG = {
     },
     "logging": {
         "level": "info",
-        "file": "~/.bdb/supervisor.log",
-        "error_file": "~/.bdb/errors.log",
+        "file": ".bdb/supervisor.log",
+        "error_file": ".bdb/errors.log",
     },
     "tracing": {
         "enabled": False,
@@ -218,6 +220,8 @@ class PreCompactHookConfig:
 
     enabled: bool = True
     inject_git_context: bool = True
+    inject_file_references: bool = True
+    inject_original_prompt: bool = False
     quote_context_files: bool = True
     context_patterns: list[str] = field(default_factory=lambda: [
         "docs/plans/*.md",
@@ -243,16 +247,27 @@ class LoggingConfig:
     """Logging configuration."""
 
     level: str = "info"
-    file: str = "~/.bdb/supervisor.log"
-    error_file: str = "~/.bdb/errors.log"
+    file: str = ".bdb/supervisor.log"
+    error_file: str = ".bdb/errors.log"
 
     def get_log_path(self) -> Path:
-        """Get expanded log file path."""
-        return Path(self.file).expanduser()
+        """Get log file path, resolved relative to git root or home."""
+        return self._resolve(self.file)
 
     def get_error_log_path(self) -> Path:
-        """Get expanded error log file path."""
-        return Path(self.error_file).expanduser()
+        """Get error log file path, resolved relative to git root or home."""
+        return self._resolve(self.error_file)
+
+    @staticmethod
+    def _resolve(path_str: str) -> Path:
+        """Resolve a log path: absolute/~ paths as-is, relative paths under git root."""
+        p = Path(path_str)
+        if p.is_absolute() or path_str.startswith("~"):
+            return p.expanduser()
+        git_root = _get_git_root()
+        if not git_root:
+            raise RuntimeError("bdb must be run inside a git repository")
+        return git_root / p
 
 
 @dataclass
@@ -465,6 +480,8 @@ hooks:
   pre_compact:
     enabled: true
     inject_git_context: true  # Inject branch name and worktree path before compaction
+    inject_file_references: true  # Inject context file names and @refs before compaction
+    inject_original_prompt: false  # Inject the first user message before compaction
     quote_context_files: true  # Include full content of CLAUDE.md/AGENTS.md (not just filenames)
     context_patterns:
       - "docs/plans/*.md"
@@ -473,11 +490,11 @@ hooks:
       - "CLAUDE.md"
       - "README.md"
 
-# Logging
+# Logging (relative paths resolve under git root, e.g. <repo>/.bdb/)
 logging:
   level: info  # debug | info | warn | error
-  file: ~/.bdb/supervisor.log
-  error_file: ~/.bdb/errors.log
+  file: .bdb/supervisor.log
+  error_file: .bdb/errors.log
 
 # Tracing (Langfuse)
 tracing:

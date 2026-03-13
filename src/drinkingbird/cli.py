@@ -626,7 +626,12 @@ def logs(tail: bool, errors: bool, lines: int) -> None:
             log_path = config.logging.get_log_path()
     except ConfigError:
         # Use defaults if config fails to load
-        log_dir = Path.home() / ".bdb"
+        from drinkingbird.config import _get_git_root
+        git_root = _get_git_root()
+        if not git_root:
+            click.echo("Not in a git repository. bdb logs are stored per-workspace.", err=True)
+            sys.exit(1)
+        log_dir = git_root / ".bdb"
         log_path = log_dir / ("errors.log" if errors else "supervisor.log")
 
     if not log_path.exists():
