@@ -618,21 +618,14 @@ def logs(tail: bool, errors: bool, lines: int) -> None:
     """
     import subprocess
 
-    try:
-        config = load_config()
-        if errors:
-            log_path = config.logging.get_error_log_path()
-        else:
-            log_path = config.logging.get_log_path()
-    except ConfigError:
-        # Use defaults if config fails to load
-        from drinkingbird.config import _get_git_root
-        git_root = _get_git_root()
-        if not git_root:
-            click.echo("Not in a git repository. bdb logs are stored per-workspace.", err=True)
-            sys.exit(1)
-        log_dir = git_root / ".bdb"
-        log_path = log_dir / ("errors.log" if errors else "supervisor.log")
+    from drinkingbird.config import _get_git_root
+
+    git_root = _get_git_root()
+    if not git_root:
+        click.echo("Not in a git repository. bdb logs are stored per-workspace.", err=True)
+        sys.exit(1)
+    log_dir = git_root / ".bdb"
+    log_path = log_dir / ("errors.log" if errors else "supervisor.log")
 
     if not log_path.exists():
         log_type = "error" if errors else "supervisor"

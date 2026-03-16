@@ -68,11 +68,6 @@ DEFAULT_CONFIG = {
             ],
         },
     },
-    "logging": {
-        "level": "info",
-        "file": ".bdb/supervisor.log",
-        "error_file": ".bdb/errors.log",
-    },
     "tracing": {
         "enabled": False,
         "public_key": None,
@@ -242,33 +237,6 @@ class HooksConfig:
     pre_compact: PreCompactHookConfig = field(default_factory=PreCompactHookConfig)
 
 
-@dataclass
-class LoggingConfig:
-    """Logging configuration."""
-
-    level: str = "info"
-    file: str = ".bdb/supervisor.log"
-    error_file: str = ".bdb/errors.log"
-
-    def get_log_path(self) -> Path:
-        """Get log file path, resolved relative to git root or home."""
-        return self._resolve(self.file)
-
-    def get_error_log_path(self) -> Path:
-        """Get error log file path, resolved relative to git root or home."""
-        return self._resolve(self.error_file)
-
-    @staticmethod
-    def _resolve(path_str: str) -> Path:
-        """Resolve a log path: absolute/~ paths as-is, relative paths under git root."""
-        p = Path(path_str)
-        if p.is_absolute() or path_str.startswith("~"):
-            return p.expanduser()
-        git_root = _get_git_root()
-        if not git_root:
-            raise RuntimeError("bdb must be run inside a git repository")
-        return git_root / p
-
 
 @dataclass
 class TracingConfig:
@@ -309,7 +277,6 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     hooks: HooksConfig = field(default_factory=HooksConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
     tracing: TracingConfig = field(default_factory=TracingConfig)
     blocklist: list[BlocklistEntry] = field(default_factory=list)
 
@@ -319,7 +286,6 @@ class Config:
         llm_data = data.get("llm", {})
         agent_data = data.get("agent", {})
         hooks_data = data.get("hooks", {})
-        logging_data = data.get("logging", {})
         tracing_data = data.get("tracing", {})
         blocklist_data = data.get("blocklist", [])
 
@@ -349,7 +315,6 @@ class Config:
             llm=LLMConfig(**llm_data) if llm_data else LLMConfig(),
             agent=AgentConfig(**agent_data) if agent_data else AgentConfig(),
             hooks=hooks_config,
-            logging=LoggingConfig(**logging_data) if logging_data else LoggingConfig(),
             tracing=TracingConfig(**tracing_data) if tracing_data else TracingConfig(),
             blocklist=blocklist,
         )
@@ -489,12 +454,6 @@ hooks:
       - ".claude/plans/*.md"
       - "CLAUDE.md"
       - "README.md"
-
-# Logging (relative paths resolve under git root, e.g. <repo>/.bdb/)
-logging:
-  level: info  # debug | info | warn | error
-  file: .bdb/supervisor.log
-  error_file: .bdb/errors.log
 
 # Tracing (Langfuse)
 tracing:

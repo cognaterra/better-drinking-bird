@@ -495,21 +495,12 @@ class TestStopHook:
             os.unlink(transcript_path)
 
     def test_last_assistant_message_without_transcript(self):
-        """Test that last_assistant_message works even with empty transcript."""
+        """No transcript means no user instruction — block for status report."""
         from unittest.mock import Mock
         from drinkingbird.config import StopHookConfig
 
         mock_llm = Mock()
         mock_llm.is_configured.return_value = True
-        mock_llm.call.return_value = Mock(
-            content={
-                "decision": "block",
-                "reason": "Agent asking what to do instead of working",
-                "message": "Don't ask. Continue with the plan.",
-            },
-            model="gpt-4o-mini",
-            usage=None,
-        )
 
         config = StopHookConfig()
         hook = StopHook(config=config, llm_provider=mock_llm)
@@ -524,8 +515,9 @@ class TestStopHook:
         result = hook.handle(hook_input, lambda msg: debug_messages.append(msg))
 
         assert result.decision == Decision.BLOCK
-        # LLM evaluates — no precheck bypass
-        mock_llm.call.assert_called_once()
+        assert "status" in result.reason.lower()
+        # No LLM call — we block before reaching it
+        mock_llm.call.assert_not_called()
 
     def test_stop_hook_active_flag_ignored(self):
         """Test that stop_hook_active flag is ignored.
@@ -770,6 +762,21 @@ class TestStopHookLLMCompletion:
     def debug(self, msg):
         self.debug_messages.append(msg)
 
+    def _make_transcript(self, user_msg="Do the task", assistant_msg=None):
+        """Create a transcript file with a user message so the hook has context."""
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        f.write(json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": user_msg},
+        }) + "\n")
+        if assistant_msg:
+            f.write(json.dumps({
+                "type": "assistant",
+                "message": {"role": "assistant", "content": assistant_msg},
+            }) + "\n")
+        f.close()
+        return f.name
+
     def test_genuine_completion_goes_to_llm(self):
         """Genuine completion with metrics goes to LLM for evaluation."""
         hook = StopHook(config=self.config, llm_provider=self.mock_llm_allow)
@@ -782,17 +789,20 @@ class TestStopHookLLMCompletion:
             "All checklist items satisfied."
         )
 
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
+        transcript = self._make_transcript()
+        try:
+            hook_input = {
+                "transcript_path": transcript,
+                "cwd": "/tmp",
+                "last_assistant_message": report,
+            }
 
-        result = hook.handle(hook_input, self.debug)
+            result = hook.handle(hook_input, self.debug)
 
-        # LLM MUST be called — no regex shortcut
-        self.mock_llm_allow.call.assert_called_once()
-        assert result.decision == Decision.ALLOW
+            self.mock_llm_allow.call.assert_called_once()
+            assert result.decision == Decision.ALLOW
+        finally:
+            os.unlink(transcript)
 
     def test_stub_report_goes_to_llm(self):
         """Reports with stubs go to LLM for evaluation."""
@@ -805,29 +815,37 @@ class TestStopHookLLMCompletion:
             "Progress: 15/105 (14.3%)\n"
         )
 
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
+        transcript = self._make_transcript()
+        try:
+            hook_input = {
+                "transcript_path": transcript,
+                "cwd": "/tmp",
+                "last_assistant_message": report,
+            }
 
-        result = hook.handle(hook_input, self.debug)
+            result = hook.handle(hook_input, self.debug)
 
-        self.mock_llm_block.call.assert_called_once()
-        assert result.decision == Decision.BLOCK
+            self.mock_llm_block.call.assert_called_once()
+            assert result.decision == Decision.BLOCK
+        finally:
+            os.unlink(transcript)
 
     def test_permission_seeking_goes_to_llm(self):
         """Permission-seeking text goes to LLM for semantic evaluation."""
         hook = StopHook(config=self.config, llm_provider=self.mock_llm_block)
 
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": "Which option would you prefer?",
-        }
+        transcript = self._make_transcript()
+        try:
+            hook_input = {
+                "transcript_path": transcript,
+                "cwd": "/tmp",
+                "last_assistant_message": "Which option would you prefer?",
+            }
 
-        result = hook.handle(hook_input, self.debug)
-        self.mock_llm_block.call.assert_called_once()
+            result = hook.handle(hook_input, self.debug)
+            self.mock_llm_block.call.assert_called_once()
+        finally:
+            os.unlink(transcript)
 
     def test_completion_with_failures_goes_to_llm(self):
         """Completion claims with failures go to LLM."""
@@ -839,16 +857,20 @@ class TestStopHookLLMCompletion:
             "❌ 2 tests FAILED\n"
         )
 
-        hook_input = {
-            "transcript_path": "",
-            "cwd": "/tmp",
-            "last_assistant_message": report,
-        }
+        transcript = self._make_transcript()
+        try:
+            hook_input = {
+                "transcript_path": transcript,
+                "cwd": "/tmp",
+                "last_assistant_message": report,
+            }
 
-        result = hook.handle(hook_input, self.debug)
+            result = hook.handle(hook_input, self.debug)
 
-        self.mock_llm_block.call.assert_called_once()
-        assert result.decision == Decision.BLOCK
+            self.mock_llm_block.call.assert_called_once()
+            assert result.decision == Decision.BLOCK
+        finally:
+            os.unlink(transcript)
 
 
 class TestStopHookHardBlock:
@@ -876,12 +898,24 @@ class TestStopHookHardBlock:
     def debug(self, msg):
         self.debug_messages.append(msg)
 
-    def _run(self, text):
+    def _run(self, text, with_user_msg=False):
         hook = StopHook(config=self.config, llm_provider=self.mock_llm)
-        result = hook.handle(
-            {"transcript_path": "", "cwd": "/tmp", "last_assistant_message": text},
-            self.debug,
-        )
+        hook_input = {"cwd": "/tmp", "last_assistant_message": text}
+        if with_user_msg:
+            f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+            f.write(json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": "Do the task"},
+            }) + "\n")
+            f.close()
+            hook_input["transcript_path"] = f.name
+        else:
+            hook_input["transcript_path"] = ""
+        try:
+            result = hook.handle(hook_input, self.debug)
+        finally:
+            if with_user_msg:
+                os.unlink(f.name)
         return result
 
     def test_zero_of_n_blocks_without_llm(self):
@@ -941,7 +975,7 @@ class TestStopHookHardBlock:
             "All 146/146 tests PASS\n"
             "Build successful\n"
         )
-        result = self._run(report)
+        result = self._run(report, with_user_msg=True)
         self.mock_llm.call.assert_called_once()
         assert result.decision == Decision.ALLOW
 

@@ -335,6 +335,15 @@ class StopHook(Hook):
         if self._precheck_hard_block(last_assistant, debug):
             return HookResult.block("Keep going.")
 
+        # No user instruction = no way to judge completion. Request a status
+        # report so the next stop hook invocation has context to evaluate.
+        if not first_user:
+            debug("No user instruction found - requesting status report")
+            return HookResult.block(
+                "Report your current status: what was the original task, "
+                "what have you completed, and what remains?"
+            )
+
         debug(f"First user: {first_user[:100] if first_user else None}...")
         debug(f"Last user: {last_user[:100] if last_user else None}...")
         debug(f"First == Last user: {first_user == last_user}")
