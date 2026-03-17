@@ -44,6 +44,17 @@ work beyond what was asked. If the user asked for a specific action and that \
 action was completed, the agent followed the user — regardless of what other \
 work remains in the plan or project.
 
+Explicit completion indicators — if the agent's response contains ANY of \
+these, agent_followed_user is TRUE unless the agent is clearly lying:
+- "All N tasks complete" or "N/N tasks done" where N matches the plan scope
+- Every item in a plan/task list marked as done/complete/finished
+- A summary listing completed work that covers the full scope of the user's \
+instruction with no items described as remaining or deferred
+Do NOT second-guess these by scanning for pre-existing issues, test failures \
+unrelated to the plan, or codebase problems that existed before the agent \
+started. The agent's job is to complete the USER'S REQUEST, not to fix every \
+issue in the repository.
+
 Referenced documents (plans, specs) provide CONTEXT for understanding the \
 work. They do NOT override or expand the user's latest instruction. If the \
 plan defines a larger scope than the user's current instruction, evaluate \
