@@ -68,6 +68,12 @@ Only reach this step if agent_followed_user is false.
 Read the agent's last message line by line. List every signal you find in the \
 signals_found array. Each entry must quote or paraphrase the specific evidence.
 
+SCOPE RULE: Only count signals that relate to WORK THE USER ASKED FOR. \
+Ignore pre-existing failures, test issues, or codebase problems that are \
+outside the plan/instruction scope. The agent mentioning "pre-existing" \
+issues it encountered or fixed is NOT a signal — it is context. Do NOT \
+invent work items that are not in the user's instruction or referenced plan.
+
 Signal categories to scan for:
 
 1. Progress metrics below 100% — "3/19 passing", "16%", "51.6% complete", \
