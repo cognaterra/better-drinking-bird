@@ -111,6 +111,9 @@ bdb status --fix              # Auto-fix detected issues
 bdb status --test-connection  # Test LLM API connectivity
 bdb status --global           # Show all installations
 
+# Shell prompt integration (fast, no output when not installed)
+bdb prompt                    # Outputs: paused, auto, interactive, or default
+
 # Run in stdin/stdout mode (called by hooks)
 bdb run
 
@@ -133,6 +136,28 @@ bdb logs --errors     # Show error log
 # Pause/resume supervision
 bdb pause             # Temporarily disable hooks
 bdb resume            # Re-enable hooks
+```
+
+## Shell Prompt Integration
+
+`bdb prompt` is a fast subcommand designed for shell prompts. It outputs nothing and exits 1 when BDB is not installed in the workspace.
+
+### Starship
+
+```toml
+[custom.bdb]
+command = "bdb prompt"
+when = "bdb prompt"
+format = "[$output]($style) "
+style = "bold cyan"
+```
+
+### Plain Bash/Zsh
+
+```bash
+# In .bashrc / .zshrc
+bdb_prompt() { local s; s=$(bdb prompt 2>/dev/null) && echo " [$s]"; }
+PS1='$(bdb_prompt)'"$PS1"
 ```
 
 ## Swiss Army Knife Mode

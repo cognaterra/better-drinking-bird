@@ -78,19 +78,46 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
             "destructive_git",
         ),
         SafetyPattern(
-            r"git\s+push\s+--force",
-            "NO. Force push is destructive. Ask the user.",
+            r"git\s+stash\b",
+            "NO. git stash hides uncommitted changes. Ask the user.",
+            "destructive_git",
+        ),
+        SafetyPattern(
+            r"git\s+push\b.*--force",
+            "NO. Do not rewrite history. Follow proper `git` usage patterns.",
             "destructive_git",
         ),
         SafetyPattern(
             r"git\s+push\s+-f\b",
-            "NO. Force push is destructive. Ask the user.",
+            "NO. Do not rewrite history. Follow proper `git` usage patterns.",
             "destructive_git",
         ),
         SafetyPattern(
             r"git\s+branch\s+-D",
             "NO. git branch -D force-deletes branches. Use -d instead.",
             "destructive_git",
+        ),
+    ],
+    "branch_switching": [
+        SafetyPattern(
+            r"git\s+(?:checkout|co)\s+(?!-b\b)(?!--\s)(?:--)?\s*[a-zA-Z]",
+            "NO. Do not switch branches. Stay on your current branch.",
+            "branch_switching",
+        ),
+        SafetyPattern(
+            r"git\s+switch\s+(?!-c\b|--create\b)(?!--detach\b)[a-zA-Z-]",
+            "NO. Do not switch branches. Stay on your current branch.",
+            "branch_switching",
+        ),
+        SafetyPattern(
+            r"git\s+(?:checkout|co)\s+-\s*$",
+            "NO. Do not switch branches. Stay on your current branch.",
+            "branch_switching",
+        ),
+        SafetyPattern(
+            r"git\s+switch\s+-\s*$",
+            "NO. Do not switch branches. Stay on your current branch.",
+            "branch_switching",
         ),
     ],
     "interactive_git": [
@@ -137,6 +164,7 @@ SAFETY_CATEGORIES: dict[str, list[SafetyPattern]] = {
             r"git\s+log\b(?!.*--oneline\b)",
             "Don't dig through git history for bugs. Read the actual code.",
             "git_history",
+            target="description",
         ),
         SafetyPattern(
             r"git\s+blame\b",

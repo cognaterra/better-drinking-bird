@@ -26,6 +26,15 @@ class PreToolHook(Hook):
         (r"(?:^|/)\.github/workflows/", "Do not modify CI workflows. Fix the code, not the pipeline."),
     ]
 
+    def _is_permitted_precommit_read(self, tool_name: str, tool_input: dict) -> bool:
+        """Permit reading (not modifying) pre-commit files so agents can view requirements."""
+        if tool_name == "Read":
+            return "pre-commit" in tool_input.get("file_path", "")
+        if tool_name == "Bash":
+            cmd = tool_input.get("command", "").strip()
+            return cmd.startswith("cat ") and "pre-commit" in cmd and ">" not in cmd
+        return False
+
     def _check_protected_paths(self, tool_name: str, tool_input: dict, debug: DebugFn) -> HookResult | None:
         """Block ANY tool interaction with protected paths.
 
@@ -55,6 +64,11 @@ class PreToolHook(Hook):
         tool_input = hook_input.get("tool_input", {})
 
         debug(f"PreToolUse: {tool_name}")
+
+        # Allow read-only access to pre-commit files so agents can view requirements
+        if self._is_permitted_precommit_read(tool_name, tool_input):
+            debug("Allowing read-only access to pre-commit file")
+            return HookResult.allow("Reading pre-commit file is permitted")
 
         # Check ALL tools against protected paths — no exceptions
         result = self._check_protected_paths(tool_name, tool_input, debug)

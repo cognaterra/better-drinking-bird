@@ -404,6 +404,27 @@ def status(use_global: bool, do_fix: bool, test_connection: bool) -> None:
 
 
 @main.command()
+def prompt() -> None:
+    """Output BDB status for shell prompts (starship, etc).
+
+    Designed to be fast: no config loading, no diagnostics, no manifest.
+    Outputs nothing and exits 1 if BDB is not installed in the workspace.
+    Otherwise outputs one of: paused, auto, interactive, default.
+    """
+    workspace = get_workspace_root()
+    if not workspace or not (workspace / ".bdb").is_dir():
+        raise SystemExit(1)
+
+    paused, _ = is_paused()
+    if paused:
+        click.echo("paused")
+        return
+
+    mode, _ = get_mode_info()
+    click.echo(mode.value)
+
+
+@main.command()
 @click.option(
     "--adapter", "-a",
     type=click.Choice(["claude-code", "cline", "cursor", "copilot", "kilo-code", "stdin", "windsurf"]),
