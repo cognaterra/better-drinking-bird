@@ -196,19 +196,26 @@ Output format:
 
 ### Stop Hook
 
+The guiding principle: the agent should keep working until the task is genuinely complete. ALLOW is the right outcome — but only when the work is done, not before.
+
 When an agent tries to stop, BDB analyzes the conversation to determine if:
 
-1. **ALLOW** - Task is genuinely complete or requires human input
-2. **BLOCK** - Agent stopped prematurely, send it back with encouragement
-3. **KILL** - Agent is confused/looping, terminate the process
+1. **ALLOW** - Task is genuinely complete or requires human input only the user can provide
+2. **BLOCK** - Agent stopped prematurely, send it back with a targeted message
+3. **KILL** - Agent is looping or hallucinating, terminate the process
+
+**Design: patterns for unambiguous, LLM for ambiguous**
+
+The evaluation pipeline has two layers:
+
+- **Regex patterns** catch unambiguous signals — hard facts that require no interpretation (e.g., `0/27 passing`, `NOT STARTED`, `Ready to proceed?`). These are immediate blocks, because no context changes their meaning.
+- **The LLM** evaluates everything semantic: false completion framing, work evasion, plan deviation. The LLM is the primary evaluator. Patterns are a safety net for cases where surface-level markers (✅ counts, passing sub-tests) can cause the LLM to miss that the overall task is incomplete.
 
 Common things that get blocked:
 - "Should I proceed with this?"
 - "Ready for your feedback"
 - "This is complex, let me try a simpler approach"
 - "We can skip those tests for now"
-
-The agent receives: *"Stick to the plan. Do it right. The reward at the end is worth it."*
 
 ### Safety Guard
 
@@ -295,6 +302,20 @@ pytest
 # Run linter
 ruff check src/
 ```
+
+### Architecture
+
+```
+src/drinkingbird/
+  hooks/
+    base.py        # Hook ABC, HookResult, Decision enum
+    stop.py        # Stop hook: precheck patterns → LLM evaluation
+    pre_tool.py    # Pre-tool hook: blocks dangerous commands
+    tool_failure.py  # Tool failure hook: LLM-powered recovery hints
+    pre_compact.py   # Pre-compact hook: injects critical file context
+```
+
+Each hook receives a JSON payload from the agent and returns `allow`, `block`, or `kill` via `HookResult`. The `Hook` base class in `base.py` defines the interface; each hook implements `handle(hook_input, debug) -> HookResult`.
 
 ## Logging
 

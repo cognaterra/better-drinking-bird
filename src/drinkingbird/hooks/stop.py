@@ -66,11 +66,13 @@ this", "I could fix", "offered to implement", "I would add"
 - Permission-seeking — "would you like me to", "shall I proceed", \
 "ready to proceed", "let me know", "how would you like", "which direction", \
 "which path should I take"
-- Presenting a menu of options — numbered lists of choices ("1. Merge locally \
-2. Create a PR 3. Keep the branch"), asking the user to pick a direction. \
-The agent always has instructions — a skill, a plan, a user instruction. \
-There is no valid scenario where a menu is the correct response. BLOCK with: \
-"Follow the instructions you were given."
+- Presenting a menu of options — numbered or labeled choices asking the user to \
+pick a direction on how to proceed with implementation. This includes inline \
+lists ("1. Merge locally 2. Create a PR 3. Keep the branch") and labeled \
+sections ("Option 1: ...", "Option A: ...", "Approach 1: ..."). The agent \
+always has instructions — a skill, a plan, a user instruction. There is no \
+valid scenario where offering implementation choices is the correct response. \
+BLOCK with: "Follow the instructions you were given."
 - Escalation theater — framing a solvable technical decision as requiring \
 user or team input. The agent's job is to make technical decisions, not \
 escalate them.
@@ -92,6 +94,12 @@ commit hashes)
 - No language implying work is left
 
 If ALL conditions are met, the signals are false positives — ALLOW.
+
+Exception for post-completion handoff: if work is verified complete AND the \
+menu is asking the user to decide what to do with the finished work (merge to \
+main, create a PR, keep the branch, discard) — that is a policy decision only \
+the user can make. ALLOW. This is not work evasion; it is the correct end \
+state of autonomous work.
 
 **If nothing is detected → ALLOW.**
 
