@@ -68,11 +68,19 @@ this", "I could fix", "offered to implement", "I would add"
 "which path should I take"
 - Presenting a menu of options — numbered or labeled choices asking the user to \
 pick a direction on how to proceed with implementation. This includes inline \
-lists ("1. Merge locally 2. Create a PR 3. Keep the branch") and labeled \
-sections ("Option 1: ...", "Option A: ...", "Approach 1: ..."). The agent \
-always has instructions — a skill, a plan, a user instruction. There is no \
-valid scenario where offering implementation choices is the correct response. \
-BLOCK with: "Follow the instructions you were given."
+lists ("1. Implement the full feature 2. Do a partial fix 3. Skip for now") \
+and labeled sections ("Option 1: ...", "Option A: ...", "Approach 1: ..."). \
+The agent always has instructions — a skill, a plan, a user instruction. \
+There is no valid scenario where offering implementation choices is the \
+correct response. BLOCK with: "Follow the instructions you were given." \
+NOTE: a menu asking the user what to do with completed work (merge, PR, keep, \
+discard) is NOT work evasion — see post-completion handoff exception in \
+Step 3.
+- Complexity theater — describing how much work something involves instead \
+of doing it ("this is a substantial undertaking", "X operations × Y \
+scenarios", "each operation requires", "this would need"). If the agent \
+is narrating the scope of the work rather than executing it, that IS work \
+evasion.
 - Escalation theater — framing a solvable technical decision as requiring \
 user or team input. The agent's job is to make technical decisions, not \
 escalate them.
@@ -95,11 +103,12 @@ commit hashes)
 
 If ALL conditions are met, the signals are false positives — ALLOW.
 
-Exception for post-completion handoff: if work is verified complete AND the \
-menu is asking the user to decide what to do with the finished work (merge to \
-main, create a PR, keep the branch, discard) — that is a policy decision only \
-the user can make. ALLOW. This is not work evasion; it is the correct end \
-state of autonomous work.
+Exception for post-completion handoff — overrides ALL work evasion signals: \
+if work is verified complete AND the agent is asking the user to decide what \
+to do with the finished work (merge to main, create a PR, keep the branch, \
+discard) — that is a policy decision only the user can make. ALLOW even if \
+permission-seeking or menu language was detected. This is the correct end \
+state of autonomous work, not evasion.
 
 **If nothing is detected → ALLOW.**
 

@@ -734,16 +734,15 @@ def resume(use_global: bool) -> None:
 
 
 @main.command("mode")
-@click.argument("new_mode", type=click.Choice(["default", "auto", "interactive"]), required=False)
+@click.argument("new_mode", type=click.Choice(["auto", "interactive"]), required=False)
 @click.option("--global", "use_global", is_flag=True, help="Set/clear global mode instead of local")
-@click.option("--clear", "do_clear", is_flag=True, help="Clear mode file (revert to default)")
+@click.option("--clear", "do_clear", is_flag=True, help="Clear mode file (revert to auto)")
 def mode_cmd(new_mode: str | None, use_global: bool, do_clear: bool) -> None:
     """Get or set BDB supervision mode.
 
     \b
     Modes:
-      default      LLM infers session type and decision
-      auto         Same as default
+      auto         LLM evaluates stop decisions (default)
       interactive  Stop hook returns ALLOW (safety hooks still run)
 
     \b

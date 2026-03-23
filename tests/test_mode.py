@@ -24,11 +24,11 @@ class TestGetMode:
     """Tests for get_mode function."""
 
     def test_default_when_no_file(self, tmp_path, monkeypatch):
-        """Test that default mode is returned when no file exists."""
+        """Test that auto mode is returned when no file exists."""
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", tmp_path / ".bdb" / MODE_FILE)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
 
-        assert get_mode() == Mode.DEFAULT
+        assert get_mode() == Mode.AUTO
 
     def test_reads_global_mode(self, tmp_path, monkeypatch):
         """Test that global mode file is read."""
@@ -38,7 +38,7 @@ class TestGetMode:
         mode_file.write_text(json.dumps({"mode": "interactive"}))
 
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", mode_file)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
 
         assert get_mode() == Mode.INTERACTIVE
 
@@ -59,21 +59,21 @@ class TestGetMode:
         local_mode.write_text(json.dumps({"mode": "interactive"}))
 
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", global_mode)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: workspace)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: workspace)
 
         assert get_mode() == Mode.INTERACTIVE
 
-    def test_invalid_mode_file_returns_default(self, tmp_path, monkeypatch):
-        """Test that invalid mode file returns default."""
+    def test_invalid_mode_file_returns_auto(self, tmp_path, monkeypatch):
+        """Test that invalid mode file returns auto."""
         global_dir = tmp_path / ".bdb"
         global_dir.mkdir()
         mode_file = global_dir / MODE_FILE
         mode_file.write_text("not json")
 
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", mode_file)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
 
-        assert get_mode() == Mode.DEFAULT
+        assert get_mode() == Mode.AUTO
 
 
 class TestSetMode:
@@ -109,7 +109,7 @@ class TestSetMode:
     def test_set_local_fails_outside_git(self, tmp_path, monkeypatch):
         """Test that setting local mode fails outside git repo."""
         os.chdir(tmp_path)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
 
         with pytest.raises(ValueError, match="Not in a git repository"):
             set_mode(Mode.INTERACTIVE, use_global=False)
@@ -155,9 +155,9 @@ class TestSupervisorModeIntegration:
         mode_file.write_text(json.dumps({"mode": "interactive"}))
 
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", mode_file)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
         # Also patch in supervisor module
-        monkeypatch.setattr("drinkingbird.supervisor.get_mode", lambda: Mode.INTERACTIVE)
+        monkeypatch.setattr("drinkingbird.supervisor.get_mode", lambda cwd=None: Mode.INTERACTIVE)
 
         # Ensure not paused
         monkeypatch.setattr("drinkingbird.pause.GLOBAL_SENTINEL", tmp_path / "no-pause")
@@ -180,8 +180,8 @@ class TestSupervisorModeIntegration:
         mode_file.write_text(json.dumps({"mode": "interactive"}))
 
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", mode_file)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
-        monkeypatch.setattr("drinkingbird.supervisor.get_mode", lambda: Mode.INTERACTIVE)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
+        monkeypatch.setattr("drinkingbird.supervisor.get_mode", lambda cwd=None: Mode.INTERACTIVE)
 
         # Ensure not paused
         monkeypatch.setattr("drinkingbird.pause.GLOBAL_SENTINEL", tmp_path / "no-pause")
@@ -202,15 +202,15 @@ class TestModeCLI:
     """Tests for mode CLI command."""
 
     def test_mode_show_default(self, tmp_path, monkeypatch):
-        """Test showing default mode."""
+        """Test showing auto mode when no file exists."""
         monkeypatch.setattr("drinkingbird.mode.GLOBAL_MODE_PATH", tmp_path / ".bdb" / MODE_FILE)
-        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda: None)
+        monkeypatch.setattr("drinkingbird.mode.get_workspace_root", lambda cwd=None: None)
 
         runner = CliRunner()
         result = runner.invoke(main, ["mode"])
 
         assert result.exit_code == 0
-        assert "default" in result.output.lower()
+        assert "auto" in result.output.lower()
 
     def test_mode_set_interactive(self, tmp_path, monkeypatch):
         """Test setting interactive mode."""

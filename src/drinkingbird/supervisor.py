@@ -216,7 +216,7 @@ class Supervisor:
             return HookResult.allow("BDB is paused")
 
         # Check mode - interactive mode skips Stop hook (safety hooks still run)
-        mode = get_mode()
+        mode = get_mode(Path(cwd) if cwd else None)
         if event_name == "Stop" and mode == Mode.INTERACTIVE:
             self.debug("Interactive mode - allowing stop", cwd=cwd)
             return HookResult.allow("Interactive mode")

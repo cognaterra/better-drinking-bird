@@ -2,8 +2,7 @@
 """Mode management for Better Drinking Bird.
 
 Modes control how BDB supervises the agent:
-- default: LLM infers session type and decision (current behavior)
-- auto: Same as default
+- auto: LLM evaluates stop decisions (default behavior when no mode file exists)
 - interactive: Stop hook returns ALLOW (safety hooks still run)
 """
 
@@ -19,7 +18,6 @@ from pathlib import Path
 class Mode(Enum):
     """BDB supervision modes."""
 
-    DEFAULT = "default"
     AUTO = "auto"
     INTERACTIVE = "interactive"
 
@@ -28,9 +26,9 @@ MODE_FILE = "mode"
 GLOBAL_MODE_PATH = Path.home() / ".bdb" / MODE_FILE
 
 
-def get_workspace_root() -> Path | None:
+def get_workspace_root(cwd: Path | None = None) -> Path | None:
     """Get git repo root from cwd, or None if not in a repo."""
-    current = Path.cwd().resolve()
+    current = (cwd or Path.cwd()).resolve()
     while current != current.parent:
         if (current / ".git").exists():
             return current
@@ -38,9 +36,9 @@ def get_workspace_root() -> Path | None:
     return None
 
 
-def get_local_mode_path() -> Path | None:
+def get_local_mode_path(cwd: Path | None = None) -> Path | None:
     """Get local mode file path if in git repo."""
-    root = get_workspace_root()
+    root = get_workspace_root(cwd)
     if root:
         return root / ".bdb" / MODE_FILE
     return None
@@ -58,13 +56,17 @@ def _read_mode_file(path: Path) -> Mode | None:
         return None
 
 
-def get_mode() -> Mode:
+def get_mode(cwd: Path | None = None) -> Mode:
     """Get current mode. Local takes precedence over global.
 
-    Returns Mode.DEFAULT if no mode file exists.
+    Args:
+        cwd: Directory to search upward from for the git repo root.
+             Defaults to Path.cwd() if not provided.
+
+    Returns Mode.AUTO if no mode file exists.
     """
     # Check local first
-    local_path = get_local_mode_path()
+    local_path = get_local_mode_path(cwd)
     if local_path:
         mode = _read_mode_file(local_path)
         if mode is not None:
@@ -75,16 +77,20 @@ def get_mode() -> Mode:
     if mode is not None:
         return mode
 
-    return Mode.DEFAULT
+    return Mode.AUTO
 
 
-def get_mode_info() -> tuple[Mode, str | None]:
+def get_mode_info(cwd: Path | None = None) -> tuple[Mode, str | None]:
     """Get current mode and its source path.
+
+    Args:
+        cwd: Directory to search upward from for the git repo root.
+             Defaults to Path.cwd() if not provided.
 
     Returns (mode, path) where path is None if using default.
     """
     # Check local first
-    local_path = get_local_mode_path()
+    local_path = get_local_mode_path(cwd)
     if local_path and local_path.exists():
         mode = _read_mode_file(local_path)
         if mode is not None:
@@ -96,7 +102,7 @@ def get_mode_info() -> tuple[Mode, str | None]:
         if mode is not None:
             return mode, str(GLOBAL_MODE_PATH)
 
-    return Mode.DEFAULT, None
+    return Mode.AUTO, None
 
 
 def set_mode(mode: Mode, use_global: bool = False) -> Path:
