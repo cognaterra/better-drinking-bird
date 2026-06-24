@@ -186,6 +186,27 @@ class WindsurfAdapter(Adapter):
 
         return True
 
+    def _strip_bdb_hooks(self, existing_hooks: dict) -> bool:
+        """Remove hooks whose command contains "bdb" and drop now-empty hook lists.
+
+        Mutates ``existing_hooks`` in place; returns True if any bdb hook was removed.
+        """
+        found_bdb = False
+        for hook_name in list(existing_hooks.keys()):
+            hook_list = existing_hooks[hook_name]
+            if not isinstance(hook_list, list):
+                continue
+            original_len = len(hook_list)
+            existing_hooks[hook_name] = [
+                h for h in hook_list
+                if not isinstance(h, dict) or "bdb" not in h.get("command", "")
+            ]
+            if len(existing_hooks[hook_name]) < original_len:
+                found_bdb = True
+            if not existing_hooks[hook_name]:
+                del existing_hooks[hook_name]
+        return found_bdb
+
     def uninstall(self, scope: str = "global", workspace: Path | None = None) -> bool:
         """Uninstall BDB hooks from Windsurf."""
         import json
@@ -205,23 +226,7 @@ class WindsurfAdapter(Adapter):
             return False
 
         # Remove hooks that contain "bdb" in the command
-        found_bdb = False
-        for hook_name in list(existing_hooks.keys()):
-            hook_list = existing_hooks[hook_name]
-            if isinstance(hook_list, list):
-                original_len = len(hook_list)
-                existing_hooks[hook_name] = [
-                    h for h in hook_list
-                    if not isinstance(h, dict) or "bdb" not in h.get("command", "")
-                ]
-                if len(existing_hooks[hook_name]) < original_len:
-                    found_bdb = True
-
-                # Remove empty arrays
-                if not existing_hooks[hook_name]:
-                    del existing_hooks[hook_name]
-
-        if not found_bdb:
+        if not self._strip_bdb_hooks(existing_hooks):
             return False
 
         # Update or remove hooks key

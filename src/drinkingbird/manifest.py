@@ -104,6 +104,22 @@ class Manifest:
             )
         )
 
+    @staticmethod
+    def _matches(
+        installation: Installation,
+        agent: str | None = None,
+        scope: str | None = None,
+        path: str | None = None,
+    ) -> bool:
+        """True if ``installation`` matches every provided (non-None) criterion."""
+        if agent is not None and installation.agent != agent:
+            return False
+        if scope is not None and installation.scope != scope:
+            return False
+        if path is not None and installation.path != path:
+            return False
+        return True
+
     def remove(
         self,
         agent: str | None = None,
@@ -116,21 +132,8 @@ class Manifest:
         """
         removed = []
         remaining = []
-
         for i in self.installations:
-            matches = True
-            if agent is not None and i.agent != agent:
-                matches = False
-            if scope is not None and i.scope != scope:
-                matches = False
-            if path is not None and i.path != path:
-                matches = False
-
-            if matches:
-                removed.append(i)
-            else:
-                remaining.append(i)
-
+            (removed if self._matches(i, agent, scope, path) else remaining).append(i)
         self.installations = remaining
         return removed
 
@@ -140,19 +143,7 @@ class Manifest:
         scope: str | None = None,
     ) -> list[Installation]:
         """Get installation records matching criteria."""
-        results = []
-
-        for i in self.installations:
-            matches = True
-            if agent is not None and i.agent != agent:
-                matches = False
-            if scope is not None and i.scope != scope:
-                matches = False
-
-            if matches:
-                results.append(i)
-
-        return results
+        return [i for i in self.installations if self._matches(i, agent, scope)]
 
     def get_agents(self) -> list[str]:
         """Get list of unique agent names."""
