@@ -1,0 +1,28 @@
+name: act101 staging scan
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: act101-ai/scan-action@v2-launch
+        with:
+          token-endpoint: https://stg.act101.ai/api/scan/token
+          oidc-audience: act101-scan
+          act-version: v1.9.3-beta
+          upload-sarif: "false"
+          pr-comment: sticky
+          arena: "true"
+          gate-fail-on: block
