@@ -330,3 +330,5 @@ MIT License - see [LICENSE](LICENSE)
 Inspired by the autonomous agent supervision needs of the Claude Code community.
 
 Named after Homer Simpson's ingenious work automation solution.
+
+<!-- act101 leaderboard staging: re-scan to surface per-language chips -->
